@@ -6,7 +6,7 @@ import { CALIBRATION_MIN_AGREEMENT, CHECKIN_DAYS, RENEWAL_WINDOW_DAYS, STALLED_D
 
 // ---- public self-serve grading pages (no nav, no passcode) ----
 function publicLayout(title: string, body: H): H {
-  return html`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${title}</title><meta name="viewport" content="width=device-width,initial-scale=1"><style>${raw(CSS)}</style></head><body style="max-width:760px"><p class="small muted" style="margin-top:18px">Evalhouse · self-serve grading</p>${body}</body></html>`;
+  return html`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${title}</title><meta name="viewport" content="width=device-width,initial-scale=1"><style>${raw(CSS)}</style></head><body><div class="pub"><p class="small muted" style="margin-top:18px">Evalhouse · self-serve grading</p>${body}</div></body></html>`;
 }
 export function gradeStart(d: Record<string, string>, errs: Record<string, string> = {}): H {
   const e = (k: string) => errs[k] ? html`<div class="ferr">${errs[k]}</div>` : "";

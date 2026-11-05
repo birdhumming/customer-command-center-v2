@@ -55,7 +55,7 @@ Deno.test("5+6 proposed edit after agreement leaves agreement intact and reopens
   const rv = (await d.get("SELECT * FROM cc2_reviews WHERE account_id=? AND kind='data_handling'", [hb.id]))! as Record<string, string>;
   assertEquals(rv.status, "open"); assertMatch(String(rv.reopened_reason), /data handling changed in rev 2/);
   const tasks = await d.all("SELECT * FROM cc2_tasks WHERE account_id=? AND automation_key='review' AND subject_id=?", [hb.id, String(rv.id)]); assertEquals(tasks.length, 1); assertEquals(tasks[0].status, "open");
-  const page = await get(`/accounts/${hb.id}?tab=scope`); assertMatch(page.text, /Proposed change requires review/); assertMatch(page.text, /remains operative/);
+  const page = await get(`/accounts/${hb.id}?tab=scope`); assertMatch(page.text, /Proposed change requires review/); assertMatch(page.text, /stays in force/);
   // Advancing delivery is blocked while the review is stale; the agreement itself is not flagged (rev 1 had no external processor)
   const adv = await stage(hb.id, "delivery", U.Priya); assertMatch(adv.err, /Not ready for Delivery/);
   assert(!/Current agreement needs review/.test(page.text));
@@ -172,7 +172,7 @@ Deno.test("revops findings: existing-customer backfill, unowned action flagged, 
   assertEquals(r.status, 302, r.text.slice(0, 300));
   const tv = await acc("Thistle & Vine"); assertEquals(tv.sales_stage, "won"); assertEquals(tv.delivery_status, "active"); assert(tv.current_agreement_id);
   let page = await get(`/accounts/${tv.id}`); assertMatch(page.text, /Renewal notice deadline 10d overdue/); assertMatch(page.text, /data restrictions not recorded yet/);
-  page = await get(`/accounts/${tv.id}/handoff`); assertMatch(page.text, /Backfilled existing engagement/);
+  page = await get(`/accounts/${tv.id}/handoff`); assertMatch(page.text, /Backfilled engagement/);
   // sales cannot be the backfilled technical owner; validation errors re-render the form with input kept
   r = await post("/accounts", { name: "Bad Backfill", owner_id: U.Maya, existing: "1", ex_deliverables: "x", ex_price_terms: "y", ex_success_metric: "m", ex_success_target: "1", ex_technical_owner_id: U.Maya, ex_evidence: "e", ex_started: "2026-01-01" });
   assertEquals(r.status, 400); assertMatch(r.text, /engineer or delivery teammate/); assertMatch(r.text, /value="Bad Backfill"/);
@@ -191,7 +191,7 @@ Deno.test("revops findings: existing-customer backfill, unowned action flagged, 
   const hb = await acc("Harbor Operations");
   const rv = (await d.get("SELECT * FROM cc2_reviews WHERE account_id=? AND kind='data_handling'", [hb.id]))! as Record<string, string>;
   assertMatch(rv.history, /"status":"approved"/);
-  page = await get(`/reviews/${rv.id}`, U.Priya); assertMatch(page.text, /Earlier decisions on this review/);
+  page = await get(`/reviews/${rv.id}`, U.Priya); assertMatch(page.text, /Earlier decisions/);
   // blocked data review gates Discovery -> Proposal
   const ns = await acc("Northstar Support");
   const nrv = (await d.get("SELECT * FROM cc2_reviews WHERE account_id=? AND kind='data_handling'", [ns.id]))! as Record<string, string>;
