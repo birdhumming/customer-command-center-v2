@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS cc2_accounts (
   last_customer_contact_at TEXT,
   health TEXT NOT NULL DEFAULT 'unknown',              -- unknown | healthy | watch | at_risk (manual)
   health_reason TEXT, health_reviewed_at TEXT,
-  renewal_date TEXT, expansion_note TEXT,
+  renewal_date TEXT, renewal_notice_days INTEGER, expansion_note TEXT,
   current_agreement_id TEXT,
   version INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS cc2_tasks (
   title TEXT NOT NULL, type TEXT NOT NULL DEFAULT 'action',   -- action | milestone | review | handoff | measurement
   owner_id TEXT REFERENCES cc2_users(id), due_date TEXT,
   status TEXT NOT NULL DEFAULT 'open',                  -- open | done | cancelled
-  committed INTEGER NOT NULL DEFAULT 0, required INTEGER NOT NULL DEFAULT 0,
+  committed INTEGER NOT NULL DEFAULT 0, required INTEGER NOT NULL DEFAULT 0, customer_side INTEGER NOT NULL DEFAULT 0,
   automation_key TEXT, subject_id TEXT, note TEXT,
   done_at TEXT, created_by TEXT REFERENCES cc2_users(id), created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   version INTEGER NOT NULL DEFAULT 1
@@ -102,4 +102,7 @@ CREATE TABLE IF NOT EXISTS cc2_activity (                  -- append-only
 CREATE INDEX IF NOT EXISTS tasks_acc ON cc2_tasks(account_id); CREATE INDEX IF NOT EXISTS activity_acc ON cc2_activity(account_id, at);
 `;
 
-export async function ensureSchema(d: DB) { await d.exec(SCHEMA); }
+export async function ensureSchema(d: DB) {
+  await d.exec(SCHEMA);
+  for (const sql of ["ALTER TABLE cc2_accounts ADD COLUMN renewal_notice_days INTEGER", "ALTER TABLE cc2_tasks ADD COLUMN customer_side INTEGER NOT NULL DEFAULT 0"]) { try { await d.exec(sql); } catch { /* column exists */ } }
+}

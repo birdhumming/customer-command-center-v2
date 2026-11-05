@@ -24,6 +24,7 @@ export const REVIEW_KINDS: Record<string, string> = {
 };
 export const ACTIVITIES = ["inference", "routing", "grading", "training", "logging"] as const;
 export const STALLED_DAYS = 14;
+export const CHECKIN_DAYS = 30;
 export const RENEWAL_WINDOW_DAYS = 30;
 export const LOST_REASONS = ["no budget", "built in-house", "competitor", "no decision", "timing", "data restrictions", "other"];
 
@@ -70,7 +71,8 @@ export function requiredReviewKinds(account: Row, rel: Related): string[] {
   const p = latest(rel.proposals), req = latest(rel.requirements);
   const kinds: string[] = [];
   if (p && !p.validation_waived_reason) kinds.push("technical_validation");
-  if (req && req.restriction_status === "specified") kinds.push("data_handling");
+  // unknown is not permission: only an explicit "none stated" (with evidence) removes the data review
+  if (p && (!req || req.restriction_status !== "none_stated")) kinds.push("data_handling");
   return kinds;
 }
 export interface ReviewState { kind: string; label: string; review: Row | null; state: "missing" | "open" | "stale" | "satisfied" | "blocked" | "conditional"; why: string }
@@ -80,7 +82,7 @@ export function reviewStates(account: Row, rel: Related): ReviewState[] {
     const r = latestReview(rel, kind), label = REVIEW_KINDS[kind];
     if (!r) return { kind, label, review: null, state: "missing", why: `${label} not requested` };
     if (r.status === "open") return { kind, label, review: r, state: "open", why: `${label} pending${r.reviewer_id ? "" : " (no reviewer)"}` };
-    if (!reviewCurrent(r, p, req)) return { kind, label, review: r, state: "stale", why: `${label} was for proposal rev ${rel.proposals.find((x) => x.id === r.proposal_id)?.revision ?? "?"}; current is rev ${p?.revision}` };
+    if (!reviewCurrent(r, p, req)) return { kind, label, review: r, state: "stale", why: `${label} was for proposal rev ${rel.proposals.find((x) => x.id === r.proposal_id)?.revision ?? "?"} / restrictions rev ${rel.requirements.find((x) => x.id === r.requirements_id)?.revision ?? "none"}; current is proposal rev ${p?.revision} / restrictions rev ${req?.revision ?? "none"}` };
     if (r.status === "blocked") return { kind, label, review: r, state: "blocked", why: `${label} blocked: ${s(r.decision_note)}` };
     if (r.status === "conditional" && !conditionsDone(r)) return { kind, label, review: r, state: "conditional", why: `${label} approved with conditions not yet checked off` };
     return { kind, label, review: r, state: "satisfied", why: `${label} approved` };
@@ -128,9 +130,15 @@ export function evaluateAccount(a: Row, rel: Related, today: string): Evaluation
       if (st.state === "stale") sig("approval_stale", "high", st.why, techOwner ?? owner, "request_review", st.kind);
       if (st.state === "blocked") sig("review_blocked", "high", st.why, owner, "revise_proposal", st.kind);
     }
-    for (const c of clarifications(req, p)) if (isPresales(a) || !agreement) sig("clarification", "warning", c, c.startsWith("proposed data handling") ? (techOwner ?? owner) : owner, c.startsWith("proposed data handling") ? "declare_handling" : "record_requirements");
+    for (const c of clarifications(req, p)) sig("clarification", "warning", c, c.startsWith("proposed data handling") ? (techOwner ?? owner) : owner, c.startsWith("proposed data handling") ? "declare_handling" : "record_requirements");
     // commitments
-    for (const t of openTasks(rel).filter((t) => t.committed && overdue(t, today))) {
+    // customer-side items: waiting on them is not stalled; late is their lateness, not our commitment
+    const waiting = openTasks(rel).filter((t) => t.customer_side);
+    for (const t of waiting) {
+      if (overdue(t, today)) sig("customer_late", "high", `Customer late ${daysBetween(s(t.due_date), today)}d: ${t.title}`, s(t.owner_id) || owner, "log_meeting", s(t.id));
+      else sig("waiting_on_customer", "warning", `Waiting on customer: ${t.title} (by ${t.due_date})`, s(t.owner_id) || owner, "open_account", s(t.id));
+    }
+    for (const t of openTasks(rel).filter((t) => t.committed && !t.customer_side && overdue(t, today))) {
       sig("overdue_commitment", "high", `Committed ${t.type === "milestone" ? "milestone" : "work"} overdue ${daysBetween(s(t.due_date), today)}d: ${t.title}`, s(t.owner_id) || owner, t.type === "review" ? "decide_review" : "complete_task", s(t.id));
     }
     // handoff
@@ -143,15 +151,25 @@ export function evaluateAccount(a: Row, rel: Related, today: string): Evaluation
     else if (openBlockers.length && a.delivery_status) sig("blocker_open", "warning", `Blocker open ${daysBetween(s(openBlockers[0].opened_at), today)}d: ${openBlockers[0].description}`, s(openBlockers[0].owner_id) || techOwner || owner, "resolve_blocker", s(openBlockers[0].id));
     // renewal
     if (a.renewal_date && a.delivery_status && a.delivery_status !== "ended") {
-      const left = daysBetween(today, s(a.renewal_date));
+      const notice = Number(a.renewal_notice_days) || 0;
+      const left = daysBetween(today, s(a.renewal_date)) - notice;     // days until the decision deadline, not the term end
+      const what = notice ? `Renewal notice deadline` : `Renewal`;
+      const when = left < 0 ? `${-left}d overdue` : `in ${left}d`;
       const os = outcomeStatus(rel.outcome);
-      if (left <= RENEWAL_WINDOW_DAYS && os.status !== "met") sig("renewal_intervention", "high", `Renewal ${left < 0 ? `${-left}d overdue` : `in ${left}d`} and success not demonstrated (${os.why})`, owner, "request_success_review");
-      else if (left <= RENEWAL_WINDOW_DAYS && !openTasks(rel).some((t) => /renew|expan/i.test(s(t.title)))) sig("renewal_step_missing", "warning", `Renewal in ${left}d with no renewal or expansion action`, owner, "add_action");
+      if (left <= RENEWAL_WINDOW_DAYS && os.status !== "met") sig("renewal_intervention", "high", `${what} ${when} and success not demonstrated (${os.why})`, owner, "request_success_review");
+      else if (left <= RENEWAL_WINDOW_DAYS && !openTasks(rel).some((t) => /renew|expan/i.test(s(t.title)))) sig("renewal_step_missing", "warning", `${what} ${when} with no renewal or expansion action`, owner, "add_action");
+    }
+    if (a.delivery_status && a.delivery_status !== "ended") {
+      const os = outcomeStatus(rel.outcome);
+      if (os.status === "below" && a.delivery_status === "active") sig("below_target", "warning", `Latest result below target (${os.why})`, techOwner ?? owner, "record_outcome");
+      const since = daysBetween(s(a.last_customer_contact_at || a.created_at), today);
+      if (since >= CHECKIN_DAYS && !waiting.some((t) => !overdue(t, today))) sig("checkin_overdue", "warning", a.last_customer_contact_at ? `No customer check-in for ${since}d` : "No customer meeting ever logged", owner, "log_meeting");
+      if (a.expansion_note && !openTasks(rel).some((t) => /expan/i.test(s(t.title)))) sig("expansion_unowned", "warning", "Expansion noted with no owned, dated action", owner, "add_action");
     }
     // cadence
     if (isPresales(a)) {
       const since = daysBetween(s(a.last_customer_contact_at || a.created_at), today);
-      if (since >= STALLED_DAYS) sig("stalled_prospect", "warning", `No customer contact for ${since}d`, owner, "log_meeting");
+      if (since >= STALLED_DAYS && !waiting.some((t) => !overdue(t, today))) sig("stalled_prospect", "warning", `No customer contact for ${since}d`, owner, "log_meeting");
       if (!a.budget && a.sales_stage !== "discovery") sig("budget_unknown", "warning", "Budget unknown", owner, "edit_account");
     }
     if (!openTasks(rel).some((t) => t.due_date)) sig("missing_next_step", "warning", "No dated next step", owner, "add_action");
@@ -208,6 +226,7 @@ export function readinessFor(a: Row, rel: Related, today: string, conf = conflic
     need("Technical owner assigned", a.technical_owner_id, undefined, "overview");
     need("Required reviews current and approved", states.length > 0 && reviewsCurrent, states.find((x) => x.state !== "satisfied")?.why ?? (states.length ? undefined : "no review requested"), "approvals");
     need("No explicit data conflict", conf.length === 0, conf[0], "approvals");
+    need("Customer data restrictions recorded (unknown is not permission)", req && req.restriction_status !== "unknown", undefined, "requirements");
   } else if (stage === "won" && ds === "onboarding_pending") {
     to = "delivery";
     const h = rel.handoffs.find((x) => x.agreement_id === a.current_agreement_id);

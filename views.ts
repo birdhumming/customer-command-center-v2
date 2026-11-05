@@ -2,7 +2,7 @@
 import { html, raw } from "npm:hono@4.6.14/html";
 import type { HtmlEscapedString } from "npm:hono@4.6.14/utils/html";
 import type { Row } from "./db.ts";
-import { ACTIVITIES, attention, daysBetween, type Evaluation, handlingOf, isPresales, latest, LOST_REASONS, n, outcomeStatus, parseJSON, type Related, REVIEW_KINDS, reviewStates, s, SEVERITY_LABEL, type Signal, STAGE_LABEL, STALLED_DAYS, RENEWAL_WINDOW_DAYS } from "./rules.ts";
+import { ACTIVITIES, addDays, attention, daysBetween, type Evaluation, handlingOf, isPresales, latest, LOST_REASONS, n, outcomeStatus, parseJSON, type Related, REVIEW_KINDS, reviewStates, s, SEVERITY_LABEL, type Signal, STAGE_LABEL, STALLED_DAYS, RENEWAL_WINDOW_DAYS } from "./rules.ts";
 
 export type H = HtmlEscapedString | Promise<HtmlEscapedString>;
 interface Ctx { me: Row | null; users: Row[]; today: string; path: string; msg: { err?: string; saved?: boolean } }
@@ -61,7 +61,8 @@ function actionFor(sg: Signal, a: Row): H {
     case "decide_review": return html`<a href="/reviews/${sg.subjectId}">Review</a>`;
     case "assign_reviewer": case "assign_technical_owner": return html`<a href="/accounts/${id}?tab=overview#owners">Assign technical owner</a>`;
     case "request_review": return html`<a href="/accounts/${id}?tab=scope#reviews">Request review</a>`;
-    case "complete_task": return html`<form method="post" action="/tasks/${sg.subjectId}/done" class="inline" style="display:inline"><input type="hidden" name="return" value="/"><button>Mark done</button></form>`;
+    case "complete_task": return html`<a href="/accounts/${id}?tab=${sg.reason.includes("milestone") ? "delivery" : "overview"}#actions">Open commitment</a>`;
+    case "open_account": return html`<a href="/accounts/${id}">Open account</a>`;
     case "accept_handoff": return html`<a href="/accounts/${id}/handoff">Accept handoff</a>`;
     case "log_meeting": return html`<a href="/accounts/${id}?tab=overview#log">Log meeting</a>`;
     case "add_action": return html`<a href="/accounts/${id}?tab=overview#add-action">Add action</a>`;
@@ -83,7 +84,7 @@ export function myWork(evals: AccEval[], x: Ctx, owner: string, view: string, qu
   const mine = (e: AccEval) => owner === "all" || s(e.a.owner_id) === owner || s(e.a.technical_owner_id) === owner;
   const qmatch = (e: AccEval) => !query || s(e.a.name).toLowerCase().includes(query.toLowerCase());
   const visible = evals.filter(mine).filter(qmatch);
-  const committed = visible.flatMap((e) => e.rel.tasks.filter((t) => t.status === "open" && t.committed && (owner === "all" || s(t.owner_id) === owner || s(e.a.owner_id) === owner)));
+  const committed = visible.flatMap((e) => e.rel.tasks.filter((t) => t.status === "open" && t.committed && !t.customer_side && (owner === "all" || s(t.owner_id) === owner || s(e.a.owner_id) === owner)));
   const overdueN = committed.filter((t) => t.due_date && s(t.due_date) < x.today).length;
   const attentionRows = visible.filter((e) => e.ev.signals.length).sort((p, q) => { const o = { critical: 0, high: 1, warning: 2 }; return o[p.ev.signals[0].severity] - o[q.ev.signals[0].severity] || s(p.a.created_at).localeCompare(s(q.a.created_at)); });
   const myTasks = evals.flatMap((e) => e.rel.tasks.filter((t) => t.status === "open" && (owner === "all" || s(t.owner_id) === owner)).map((t) => ({ e, t })))
@@ -181,13 +182,13 @@ function overviewTab(a: Row, rel: Related, ev: Evaluation, x: Ctx, acts: Row[]):
   </div><div>
   <h2 id="log">Log meeting</h2>
   <form method="post" action="/accounts/${id}/meetings"><div class="row"><label class="field"><span>Date</span><input type="date" name="date" value="${t}"></label><label class="field" style="flex:3"><span>Summary</span><input name="summary" required style="width:100%" placeholder="who, what was said, numbers"></label></div>
-    <div class="row small"><label class="field" style="flex:2"><span>Next action (optional)</span><input name="action_title" style="width:100%"></label><label class="field"><span>Owner</span><select name="action_owner">${userOpt(x.users, a.owner_id)}</select></label><label class="field"><span>Due</span><input type="date" name="action_due"></label></div>
+    <div class="row small"><label class="field" style="flex:2"><span>Next action (optional)</span><input name="action_title" style="width:100%"></label><label class="field"><span>Owner</span><select name="action_owner">${userOpt(x.users, a.owner_id)}</select></label><label class="field"><span>Due</span><input type="date" name="action_due"></label><label class="field"><span>&nbsp;</span><label><input type="checkbox" name="action_customer_side" value="1"> waiting on customer</label></label></div>
     <button class="primary">Save meeting${""} and action</button></form>
   <h2 id="add-action">Next actions</h2>
   ${openTasks.length ? html`<table>${openTasks.map((k) => html`<tr><td class="nowrap">${fmt(k.due_date)}<div class="small">${k.due_date ? dueWord(s(k.due_date), t) : html`<span class="muted">no date</span>`}</div></td><td>${k.title}${k.committed ? html` <span class="lbl">committed</span>` : ""}<div class="small muted">${k.type} · ${k.owner_name ?? "unassigned"}</div>
     ${["action", "milestone", "measurement"].includes(s(k.type)) ? html`<details><summary>edit</summary><form method="post" action="/tasks/${k.id}/edit" class="row small"><input type="hidden" name="version" value="${k.version}"><label class="field" style="flex:2"><span>Title</span><input name="title" value="${k.title}"></label><label class="field"><span>Owner</span><select name="owner_id">${userOpt(x.users, k.owner_id)}</select></label><label class="field"><span>Due</span><input type="date" name="due_date" value="${k.due_date ?? ""}"></label><label class="field"><span>&nbsp;</span><label><input type="checkbox" name="committed" value="1" ${k.committed ? "checked" : ""}> customer commitment</label>${k.type === "milestone" ? html` <label><input type="checkbox" name="required" value="1" ${k.required ? "checked" : ""}> required</label>` : ""}</label><button>Save</button></form></details>` : ""}</td>
     <td>${k.type === "review" ? html`<a href="/reviews/${k.subject_id}">Decide</a>` : k.type === "handoff" ? html`<a href="/accounts/${id}/handoff">Accept</a>` : html`<form method="post" action="/tasks/${k.id}/done"><input type="hidden" name="version" value="${k.version}"><input type="hidden" name="return" value="/accounts/${id}"><button>Done</button></form>`}</td></tr>`)}</table>` : html`<p class="amber small">No open actions. Every open account should have a dated next step.</p>`}
-  <form method="post" action="/accounts/${id}/tasks" class="row small"><input type="hidden" name="type" value="action"><label class="field" style="flex:3"><span>Add action</span><input name="title" required style="width:100%"></label><label class="field"><span>Owner</span><select name="owner_id">${userOpt(x.users, a.owner_id)}</select></label><label class="field"><span>Due</span><input type="date" name="due_date"></label><label class="field"><span>&nbsp;</span><label><input type="checkbox" name="committed" value="1"> customer commitment</label></label><button>Add</button></form>
+  <form method="post" action="/accounts/${id}/tasks" class="row small"><input type="hidden" name="type" value="action"><label class="field" style="flex:3"><span>Add action</span><input name="title" required style="width:100%"></label><label class="field"><span>Owner</span><select name="owner_id">${userOpt(x.users, a.owner_id)}</select></label><label class="field"><span>Due</span><input type="date" name="due_date"></label><label class="field"><span>&nbsp;</span><label><input type="checkbox" name="committed" value="1"> our commitment</label> <label><input type="checkbox" name="customer_side" value="1"> waiting on customer</label></label><button>Add</button></form>
   <p class="small muted">A customer commitment requires a due date and counts toward the overdue metric.</p>
   ${rel.tasks.some((k) => k.status !== "open") ? html`<details><summary>${rel.tasks.filter((k) => k.status !== "open").length} completed</summary><ul class="small muted">${rel.tasks.filter((k) => k.status !== "open").map((k) => html`<li>${fmt(k.done_at)} ${k.title}</li>`)}</ul></details>` : ""}
 
@@ -297,8 +298,8 @@ function deliveryTab(a: Row, rel: Related, ev: Evaluation, x: Ctx): H {
     <button class="primary">Save</button> <span class="small muted">A different basis is not shown as comparable improvement.</span></form></details>
   <form method="post" action="/accounts/${id}/tasks" class="row small"><input type="hidden" name="type" value="measurement"><input type="hidden" name="committed" value="1"><label class="field" style="flex:3"><span>Add measurement task</span><input name="title" style="width:100%" value="Measure ${o?.metric ?? "success metric"}"></label><label class="field"><span>Owner</span><select name="owner_id">${userOpt(x.users, a.technical_owner_id ?? a.owner_id)}</select></label><label class="field"><span>Due *</span><input type="date" name="due_date" required></label><button>Add</button></form>
   <h2>Check-ins, renewal, expansion</h2>
-  <p class="small">Next check-in: ${checkin ? html`${fmt(checkin.due_date)} — ${checkin.title}` : html`<span class="amber">none scheduled</span>`}<br>Renewal: ${a.renewal_date ? html`${a.renewal_date} (${dueWord(s(a.renewal_date), t)})` : html`<span class="muted">no date</span>`}<br>Expansion: ${a.expansion_note ?? html`<span class="muted">none noted</span>`}</p>
-  <details class="drawer"><summary>Edit renewal / expansion</summary><form method="post" action="/accounts/${id}/edit/renewal" class="row small"><input type="hidden" name="version" value="${v}"><label class="field"><span>Renewal date</span><input type="date" name="renewal_date" value="${a.renewal_date ?? ""}"></label><label class="field" style="flex:3"><span>Expansion next step</span><input name="expansion_note" value="${a.expansion_note ?? ""}" style="width:100%"></label><button class="primary">Save</button></form></details>
+  <p class="small">Next check-in: ${checkin ? html`${fmt(checkin.due_date)} — ${checkin.title}` : html`<span class="amber">none scheduled</span>`}<br>Renewal: ${a.renewal_date ? html`${a.renewal_date} (${dueWord(s(a.renewal_date), t)})${a.renewal_notice_days ? html` · notice ${a.renewal_notice_days}d before, i.e. decide by ${addDays(s(a.renewal_date), -Number(a.renewal_notice_days))}` : ""}` : html`<span class="muted">no date</span>`}<br>Expansion: ${a.expansion_note ?? html`<span class="muted">none noted</span>`}</p>
+  <details class="drawer"><summary>Edit renewal / expansion</summary><form method="post" action="/accounts/${id}/edit/renewal" class="row small"><input type="hidden" name="version" value="${v}"><label class="field"><span>Renewal date</span><input type="date" name="renewal_date" value="${a.renewal_date ?? ""}"></label><label class="field"><span>Notice period (days before)</span><input name="renewal_notice_days" value="${a.renewal_notice_days ?? ""}" size="4"></label><label class="field" style="flex:3"><span>Expansion next step</span><input name="expansion_note" value="${a.expansion_note ?? ""}" style="width:100%"></label><button class="primary">Save</button></form></details>
   ${a.delivery_status !== "ended" ? html`<details class="drawer" id="end"><summary>End engagement</summary><form method="post" action="/accounts/${id}/end" class="row small"><label class="field" style="flex:3"><span>Outcome / reason *</span><input name="reason" required style="width:100%"></label><label class="field"><span>End date</span><input type="date" name="ended_at" value="${t}"></label><button>End</button></form></details>` : ""}
   </div></div>`;
 }
@@ -344,6 +345,7 @@ export function handoffPage(a: Row, rel: Related, ev: Evaluation, x: Ctx): H {
   return html`<h1>Handoff · ${link(a)}</h1><p class="small muted">Rendered from the accepted agreement (rev ${p.revision}, accepted ${fmt(g.accepted_at)}; evidence as recorded: <i>${g.acceptance_evidence}</i>) and current records. There is no second editable copy.</p>
   <div class="grid"><div>
   <h2>Agreement</h2><dl class="kv small"><dt>Deliverables</dt><dd><pre class="wrap">${p.deliverables}</pre></dd><dt>Exclusions</dt><dd>${p.exclusions ?? "—"}</dd><dt>Price / payment</dt><dd>${p.price_terms ?? "—"}</dd><dt>Dates</dt><dd>${p.dates ?? "—"}</dd><dt>Customer responsibilities</dt><dd>${p.customer_responsibilities ?? "—"}</dd><dt>Success criterion</dt><dd>${p.success_metric} → ${p.success_target}${p.success_unit ?? ""} (${p.success_direction} is better; basis ${p.success_basis ?? "unspecified"})</dd><dt>Data handling as agreed</dt><dd>${handlingText(handlingOf(p))}</dd><dt>Customer restrictions at acceptance</dt><dd>${req ? html`${req.restriction_status}${req.wording ? html` — <i>${req.wording}</i>` : ""}` : "not recorded"}</dd></dl>
+  ${changedBeforeAcceptance(p, rel)}
   <h2>People</h2><p class="small">Customer contact: ${a.contact ?? "—"} · Buyer: ${a.buyer ?? "—"} · Account owner: ${a.owner_name} · Technical owner: ${a.technical_owner_name ?? html`<span class="red">unassigned</span>`}</p>
   </div><div>
   <h2>Milestones</h2>${ms.length ? html`<ul class="small">${ms.map((k) => html`<li>${k.status === "open" ? "☐" : "☑"} ${fmt(k.due_date)} ${k.title} <span class="muted">(${k.owner_name ?? "unassigned"})</span></li>`)}</ul>` : html`<p class="amber small">None yet.</p>`}
@@ -353,6 +355,19 @@ export function handoffPage(a: Row, rel: Related, ev: Evaluation, x: Ctx): H {
   <h2>Acceptance</h2>
   ${h?.accepted_at && !h.stale_reason ? html`<p>Accepted ${fmt(h.accepted_at)} by ${h.accepted_by_name}.${h.acceptance_note ? html` <blockquote>${h.acceptance_note}</blockquote>` : ""}</p>` : html`<form method="post" action="/handoffs/${h?.id}/accept"><label class="field"><span>Note (what you are worried about, what you need)</span><input name="note" style="width:100%"></label><button class="primary" ${s(x.me?.id) === s(a.technical_owner_id) ? "" : "disabled"}>I accept this engagement as technical owner</button> ${s(x.me?.id) === s(a.technical_owner_id) ? "" : html`<span class="small muted">only ${a.technical_owner_name ?? "the technical owner"} can accept; switch identity top-right if that is you</span>`}</form>`}
   </div></div>`;
+}
+
+// What the customer heard earlier but is not in the accepted text. Delivery should assume they may still expect it.
+function changedBeforeAcceptance(p: Row, rel: Related): H {
+  const earlier = rel.proposals.filter((k) => Number(k.revision) < Number(p.revision)).sort((x, y) => Number(x.revision) - Number(y.revision));
+  if (!earlier.length) return html``;
+  const first = earlier[0];
+  const FIELDS: [string, string][] = [["deliverables", "Deliverables"], ["exclusions", "Exclusions"], ["price_terms", "Price / payment"], ["dates", "Dates"], ["customer_responsibilities", "Customer responsibilities"], ["success_metric", "Success metric"], ["success_target", "Target"]];
+  const diffs = FIELDS.filter(([k]) => s(first[k]) !== s(p[k]));
+  const notes = rel.proposals.filter((k) => Number(k.revision) > 1 && Number(k.revision) <= Number(p.revision) && k.change_note).sort((x, y) => Number(x.revision) - Number(y.revision));
+  return html`<h2>Changed before acceptance</h2><p class="small muted">Rev 1 → accepted rev ${p.revision}. The customer may still expect what was discussed earlier; confirm before delivering against it.</p>
+  ${notes.length ? html`<ul class="small">${notes.map((k) => html`<li>Rev ${k.revision}: ${k.change_note}</li>`)}</ul>` : ""}
+  ${diffs.length ? html`<dl class="kv small">${diffs.map(([k, label]) => html`<dt>${label}</dt><dd><span class="muted">was:</span> <pre class="wrap" style="display:inline">${s(first[k]) || "—"}</pre><br><span class="muted">now:</span> <pre class="wrap" style="display:inline">${s(p[k]) || "—"}</pre></dd>`)}</dl>` : html`<p class="small muted">No field differs from rev 1.</p>`}`;
 }
 
 export function howAlertsWork(): H {

@@ -2,6 +2,7 @@
 Deno.env.set("CCC_DB", "/tmp/ccc2_test.sqlite");
 try { Deno.removeSync("/tmp/ccc2_test.sqlite"); } catch { /* fresh */ }
 import { assert, assertEquals, assertMatch } from "jsr:@std/assert@1";
+import { addDays } from "./rules.ts";
 const fetchApp = (await import("./main.ts")).default;
 const { db } = await import("./db.ts");
 const d = await db();
@@ -15,6 +16,7 @@ async function post(path: string, body: Record<string, string>, me = U.Maya) {
   return { status: r.status, loc: r.headers.get("location") ?? "", err: decodeURIComponent((r.headers.get("location") ?? "").split("err=")[1] ?? ""), text: r.status !== 302 ? await r.text() : "" };
 }
 const get = async (path: string, me = U.Maya) => { const r = await fetchApp(new Request("http://x" + path, { headers: { cookie: `${cookie}; ccc2_me=${me}` } })); return { status: r.status, text: await r.text() }; };
+const stage = async (id: string, to: string, me = U.Maya, extra: Record<string, string> = {}) => { const a = (await d.get("SELECT version FROM cc2_accounts WHERE id=?", [id]))!; return post(`/accounts/${id}/stage`, { to, version: String(a.version), ...extra }, me); };
 const acc = async (name: string) => (await d.get("SELECT * FROM cc2_accounts WHERE name=?", [name]))! as Record<string, string>;
 
 Deno.test("1 create persists; new account starts in Discovery owned by me", async () => {
@@ -38,8 +40,8 @@ Deno.test("3 meeting + action save together; contact date moves", async () => {
 Deno.test("4 stage change fails server-side with the missing list; skipping rejected", async () => {
   const a = await acc("Halden Health");
   let r = await post(`/accounts/${a.id}/stage`, { to: "proposal", version: String(a.version) }); assertMatch(r.err, /Not ready for Proposal: .*Customer contact/);
-  r = await post(`/accounts/${a.id}/stage`, { to: "negotiation" }); assertMatch(r.err, /skipping is rejected/);
-  r = await post(`/accounts/${a.id}/stage`, { to: "won" }); assertMatch(r.err, /skipping is rejected|Confirm agreement/);
+  r = await stage(a.id, "negotiation"); assertMatch(r.err, /skipping is rejected/);
+  r = await stage(a.id, "won"); assertMatch(r.err, /skipping is rejected|Confirm agreement/);
   assertEquals((await acc("Halden Health")).sales_stage, "discovery");
 });
 Deno.test("5+6 proposed edit after agreement leaves agreement intact and reopens the data review", async () => {
@@ -55,7 +57,7 @@ Deno.test("5+6 proposed edit after agreement leaves agreement intact and reopens
   const tasks = await d.all("SELECT * FROM cc2_tasks WHERE account_id=? AND automation_key='review' AND subject_id=?", [hb.id, String(rv.id)]); assertEquals(tasks.length, 1); assertEquals(tasks[0].status, "open");
   const page = await get(`/accounts/${hb.id}?tab=scope`); assertMatch(page.text, /Proposed change requires review/); assertMatch(page.text, /remains operative/);
   // Advancing delivery is blocked while the review is stale; the agreement itself is not flagged (rev 1 had no external processor)
-  const adv = await post(`/accounts/${hb.id}/stage`, { to: "delivery" }); assertMatch(adv.err, /Not ready for Delivery/);
+  const adv = await stage(hb.id, "delivery", U.Priya); assertMatch(adv.err, /Not ready for Delivery/);
   assert(!/Current agreement needs review/.test(page.text));
 });
 Deno.test("7 confirming agreement twice yields one agreement, one handoff, one acceptance task", async () => {
@@ -75,7 +77,7 @@ Deno.test("7 confirming agreement twice yields one agreement, one handoff, one a
   assertEquals(Number((await d.get("SELECT COUNT(*) c FROM cc2_handoffs WHERE account_id=?", [at.id]))!.c), 1);
   assertEquals(Number((await d.get("SELECT COUNT(*) c FROM cc2_tasks WHERE account_id=? AND type='handoff'", [at.id]))!.c), 1);
   const a3 = await acc("Atlas Commerce"); assertEquals(a3.sales_stage, "won"); assertEquals(a3.delivery_status, "onboarding_pending");
-  const dd = await post(`/accounts/${at.id}/stage`, { to: "onboarding_pending" }); assertMatch(dd.err, /skipping is rejected|only forward step/);
+  const dd = await stage(at.id, "onboarding_pending"); assertMatch(dd.err, /skipping is rejected|only forward step/);
   // handoff: only Leo (technical owner) can accept
   const h = (await d.get("SELECT * FROM cc2_handoffs WHERE account_id=?", [at.id]))! as Record<string, string>;
   assertMatch((await post(`/handoffs/${h.id}/accept`, { note: "x" }, U.Maya)).err, /Only the technical owner/);
@@ -118,4 +120,49 @@ Deno.test("requirements mismatch: specified 'no external processing' vs rev 2 pr
   const hb = await acc("Harbor Operations");
   const page = await get(`/accounts/${hb.id}`); assertMatch(page.text, /Critical/); assertMatch(page.text, /Proposed change requires review/);
   assert(!/Current agreement needs review/.test(page.text));
+});
+
+Deno.test("review findings: identity required; only the reviewer decides; sales cannot review", async () => {
+  const ns = await acc("Northstar Support");
+  const r = await fetchApp(new Request("http://x/accounts/" + ns.id + "/tasks", { method: "POST", headers: { cookie }, body: new URLSearchParams({ title: "anon", due_date: today }), redirect: "manual" }));
+  assertEquals(r.status, 403);
+  const rv = (await d.get("SELECT * FROM cc2_reviews WHERE account_id=? AND kind='data_handling'", [ns.id]))! as Record<string, string>;
+  assertMatch((await post(`/reviews/${rv.id}/decide`, { status: "approved", decision_note: "x", version: String(rv.version) }, U.Priya)).err, /Only the assigned reviewer/);
+  assertMatch((await post(`/accounts/${ns.id}/reviews`, { kind: "technical_validation", reviewer_id: U.Maya, question: "self" })).err, /not sales/);
+  assertMatch((await post(`/reviews/${rv.id}/decide`, { status: "approved", decision_note: "x" }, U.Leo)).err, /changed since you opened it/);
+});
+Deno.test("review findings: unknown restrictions are not permission at Won; specified cannot go back to unknown", async () => {
+  await post("/accounts", { name: "Caldera Freight", owner_id: U.Maya, problem: "Dispatch agent", contact: "Rosa" });
+  const cf = await acc("Caldera Freight");
+  await post(`/accounts/${cf.id}/edit/overview`, { contact: "Rosa", buyer_status: "named", buyer: "Rosa", problem: "Dispatch agent", version: String(cf.version) });
+  await post(`/accounts/${cf.id}/proposals`, { deliverables: "Eval harness", price_terms: "$40k", success_metric: "Wrong-dispatch rate", success_target: "5", success_unit: "%", success_direction: "lower", h_external: "yes", h_processors: "OpenAI grader", h_retention: "none", h_training: "no", shared: "1" });
+  // no requirements recorded at all -> data review is required, Won gate names restrictions
+  const page = await get(`/accounts/${cf.id}?tab=scope`); assertMatch(page.text, /Data review not requested/);
+  await post(`/accounts/${cf.id}/requirements`, { restriction_status: "specified", wording: "No data leaves our VPC", external_processing: "no", retention: "none", training_use: "no" });
+  assertMatch((await post(`/accounts/${cf.id}/requirements`, { restriction_status: "unknown" })).err, /cannot go back to unknown/);
+  assertMatch((await post(`/accounts/${cf.id}/requirements`, { restriction_status: "specified", wording: "x", external_processing: "maybe", retention: "forever", training_use: "sometimes" })).err, /only the listed values/);
+  assertMatch((await post(`/accounts/${cf.id}/requirements`, { restriction_status: "none_stated" })).err, /evidence note/);
+});
+Deno.test("review findings: lost accounts are read-only; garbage dates and owners rejected; tab preserved on error", async () => {
+  const ns = await acc("Northstar Support");
+  assertMatch((await post(`/accounts/${ns.id}/meetings`, { date: "2025-02-30", summary: "x" })).err, /real date/);
+  assertMatch((await post(`/accounts/${ns.id}/meetings`, { date: "9999-12-31", summary: "x" })).err, /real date/);
+  const b = await post(`/accounts/${ns.id}/blockers`, { description: "x", owner_id: "bogus" }, U.Leo); assertEquals(b.status, 302, b.text.slice(0, 200));
+  const m = await post(`/accounts/${ns.id}/meetings`, { summary: "m", action_title: "a", action_due: today, action_owner: "bogus" }); assertEquals(m.status, 302, m.text.slice(0, 200));
+  const e = await post(`/accounts/${ns.id}/proposals`, { deliverables: "x" }); assert(e.loc.includes("?tab=scope&err="), e.loc);
+  await post("/accounts", { name: "Gone Co", owner_id: U.Maya });
+  const g = await acc("Gone Co");
+  assertEquals((await stage(g.id, "lost", U.Maya, { reason: "went in-house" })).status, 302);
+  assertMatch((await post(`/accounts/${g.id}/edit/health`, { health: "healthy", health_reason: "nope", version: "2" })).err, /read-only/);
+  assertMatch((await post(`/accounts/${g.id}/tasks`, { title: "x", due_date: today })).err, /read-only/);
+});
+Deno.test("review findings: waiting on customer is not stalled; renewal notice period moves the deadline; dropped scope shows in handoff", async () => {
+  const hh = await acc("Halden Health");
+  const r = await post(`/accounts/${hh.id}/tasks`, { title: "Counsel back from leave; DPA redlines due", due_date: addDays(today, 10), customer_side: "1" }); assertEquals(r.status, 302, r.err);
+  let page = await get(`/accounts/${hh.id}`); assertMatch(page.text, /Waiting on customer: Counsel back/); assert(!/No customer contact for/.test(page.text), "stalled suppressed while waiting");
+  const md = await acc("Meridian Services");
+  await post(`/accounts/${md.id}/edit/renewal`, { renewal_date: addDays(today, 46), renewal_notice_days: "60", expansion_note: "Add refunds queue", version: String(md.version) }, U.Priya);
+  page = await get(`/accounts/${md.id}`); assertMatch(page.text, /Renewal notice deadline 14d overdue/); assertMatch(page.text, /Expansion noted with no owned, dated action/);
+  const at = await acc("Atlas Commerce");
+  page = await get(`/accounts/${at.id}/handoff`); assertMatch(page.text, /Changed before acceptance/);
 });

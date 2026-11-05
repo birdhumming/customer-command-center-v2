@@ -5,7 +5,7 @@ import { deleteCookie, getCookie, setCookie } from "npm:hono@4.6.14/cookie";
 import { type Arg, db as getDB, nowISO, type Row, type Stmt, uuid } from "./db.ts";
 import { seed } from "./seed.ts";
 import { activity, loadAccount, loadAccounts, loadRelated, todayISO, users as loadUsers } from "./data.ts";
-import { conflicts, evaluateAccount, handlingOf, isPresales, latest, readinessFor, REVIEW_KINDS, s, STAGE_LABEL, type Related } from "./rules.ts";
+import { ACTIVITIES, conflicts, evaluateAccount, handlingOf, isOpenAccount, isPresales, latest, readinessFor, REVIEW_KINDS, s, STAGE_LABEL, type Related } from "./rules.ts";
 import * as V from "./views.ts";
 
 const d = await getDB();
@@ -19,7 +19,12 @@ const str = (f: Body, k: string) => { const v = f[k]; return typeof v === "strin
 const nul = (f: Body, k: string): Arg => str(f, k) || null;
 const num = (f: Body, k: string): number | null => { const v = str(f, k).replace(/[$,%\s]/g, ""); if (!v) return null; const x = Number(v); return Number.isFinite(x) ? x : null; };
 const arr = (f: Body, k: string): string[] => { const v = f[k + "[]"] ?? f[k]; if (v == null) return []; return (Array.isArray(v) ? v : [v]).map((x) => typeof x === "string" ? x.trim() : "").filter(Boolean); };
-const isDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v + "T00:00:00Z"));
+// strict: must round-trip (no 2025-02-30) and sit in a plausible range; never silently substituted
+const isDate = (v: string) => { if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false; const t = Date.parse(v + "T00:00:00Z"); return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 10) === v && v >= "2000-01-01" && v <= "2100-12-31"; };
+// optional date field: blank -> fallback; present -> must be valid
+const dateField = (f: Body, k: string, fallback: string | null): { ok: boolean; value: string | null } => { const v = str(f, k); return v ? { ok: isDate(v), value: v } : { ok: true, value: fallback }; };
+const validUser = (us: Row[], id: string) => !!id && us.some((u) => u.id === id);
+const isReviewerRole = (us: Row[], id: string) => us.some((u) => u.id === id && u.role !== "sales");
 const safeNext = (v: string | undefined) => v && v.startsWith("/") && !v.startsWith("//") ? v : "/";
 const q = (c: Context, k: string) => c.req.query(k) ?? "";
 
@@ -40,6 +45,22 @@ app.use("*", async (c, next) => {
   }
   await next();
 });
+// Every change is attributed to a chosen teammate; no identity, no writes (and no silent fallback to the first user).
+app.use("*", async (c, next) => {
+  if (c.req.method === "POST" && !["/login", "/me", "/admin/reseed"].includes(c.req.path)) {
+    const me = getCookie(c, "ccc2_me");
+    if (!me || !(await d.get("SELECT id FROM cc2_users WHERE id=?", [me]))) return c.text("Pick your name (top-right) before making changes.", 403);
+  }
+  await next();
+});
+// Lost/Ended accounts are read-only except for a stage change (reopen with a reason).
+app.use("/accounts/:id/*", async (c, next) => {
+  if (c.req.method === "POST" && !c.req.path.endsWith("/stage")) {
+    const a = await loadAccount(d, c.req.param("id"));
+    if (a && !isOpenAccount(a)) return back(c, accPath(s(a.id)), `This account is ${a.sales_stage === "lost" ? "Lost" : "Ended"} and read-only. Reopen it with a reason first.`);
+  }
+  await next();
+});
 app.post("/me", async (c) => {
   const f = await c.req.parseBody() as Body;
   const ok = str(f, "me") && await d.get("SELECT id FROM cc2_users WHERE id=?", [str(f, "me")]);
@@ -51,10 +72,10 @@ interface Ctx { me: Row | null; users: Row[]; today: string; path: string; msg: 
 async function ctx(c: Context): Promise<Ctx> {
   const us = await loadUsers(d);
   const meId = getCookie(c, "ccc2_me");
-  return { me: us.find((u) => u.id === meId) ?? us[0] ?? null, users: us, today: todayISO(), path: c.req.path, msg: { err: c.req.query("err") || undefined, saved: c.req.query("saved") === "1" } };
+  return { me: us.find((u) => u.id === meId) ?? null, users: us, today: todayISO(), path: c.req.path, msg: { err: c.req.query("err") || undefined, saved: c.req.query("saved") === "1" } };
 }
 const page = (c: Context, x: Ctx, title: string, body: V.H, status = 200) => c.html(V.layout(title, body, x), status as 200);
-const back = (c: Context, path: string, err?: string, saved = false) => c.redirect(`${path}${err ? "?err=" + encodeURIComponent(err) : saved ? "?saved=1" : ""}`);
+const back = (c: Context, path: string, err?: string, saved = false) => { const [p, hash] = path.split("#"); const sep = p.includes("?") ? "&" : "?"; return c.redirect(`${p}${err ? sep + "err=" + encodeURIComponent(err) : saved ? sep + "saved=1" : ""}${hash ? "#" + hash : ""}`); };
 const accPath = (id: string, tab?: string, anchor?: string) => `/accounts/${id}${tab ? "?tab=" + tab : ""}${anchor ? "#" + anchor : ""}`;
 const act = (account_id: string, actor_id: string | null, event_type: string, payload: Record<string, unknown> = {}): Stmt => ({ sql: "INSERT INTO cc2_activity(id,account_id,actor_id,event_type,at,payload) VALUES (?,?,?,?,?,?)", args: [uuid(), account_id, actor_id, event_type, nowISO(), JSON.stringify(payload)] });
 const touch = (id: string): Stmt => ({ sql: "UPDATE cc2_accounts SET version=version+1, updated_at=? WHERE id=?", args: [nowISO(), id] });
@@ -64,7 +85,8 @@ async function loadEval(id: string, us?: Row[]) {
   return { a, rel, ev: evaluateAccount(a, rel, todayISO()) };
 }
 // Optimistic concurrency: the form carries the version it was rendered from.
-const versionMismatch = (row: Row | undefined, f: Body) => { const v = num(f, "version"); return row && v != null && Number(row.version) !== v; };
+// A missing or garbled version is treated as stale: protection is not opt-in.
+const versionMismatch = (row: Row | undefined, f: Body) => { const v = num(f, "version"); return !!row && (v == null || Number(row.version) !== v); };
 
 // Automation tasks are unique per (account, rule, subject). Re-requests reopen the same row.
 async function ensureTask(account_id: string, key: string, subject_id: string, fields: { title: string; type: string; owner_id: string | null; due_date: string | null; required?: number; committed?: number; created_by: string | null }): Promise<Stmt[]> {
@@ -141,7 +163,7 @@ const ACCOUNT_FIELDS: Record<string, string[]> = {
   overview: ["contact", "buyer", "buyer_status", "problem", "budget"],
   owners: ["owner_id", "technical_owner_id"],
   health: ["health", "health_reason"],
-  renewal: ["renewal_date", "expansion_note"],
+  renewal: ["renewal_date", "renewal_notice_days", "expansion_note"],
 };
 app.post("/accounts/:id/edit/:section", async (c) => {
   const x = await ctx(c), id = c.req.param("id"), section = c.req.param("section"), f = await c.req.parseBody() as Body;
@@ -150,9 +172,9 @@ app.post("/accounts/:id/edit/:section", async (c) => {
   if (versionMismatch(a, f)) return back(c, accPath(id, "overview"), "Someone else changed this account since you opened it. Reload and retry; your text was not saved.");
   const vals: Record<string, Arg> = {};
   for (const k of fields) vals[k] = nul(f, k);
-  if (section === "overview") { if (!["not_assessed", "unknown", "named"].includes(s(vals.buyer_status))) vals.buyer_status = "not_assessed"; if (vals.buyer_status === "named" && !vals.buyer) return back(c, accPath(id), "Buyer status is 'named' but no buyer name given."); }
-  if (section === "owners") { if (!vals.owner_id || !x.users.some((u) => u.id === vals.owner_id)) return back(c, accPath(id), "Account owner is required."); if (vals.technical_owner_id && !x.users.some((u) => u.id === vals.technical_owner_id)) vals.technical_owner_id = null; }
-  if (section === "renewal" && vals.renewal_date && !isDate(s(vals.renewal_date))) return back(c, accPath(id, "delivery"), "Renewal date must be YYYY-MM-DD.");
+  if (section === "overview") { if (!["not_assessed", "unknown", "named"].includes(s(vals.buyer_status))) vals.buyer_status = "not_assessed"; if (vals.buyer_status === "named" && !vals.buyer) return back(c, accPath(id), "Buyer status is 'named' but no buyer name given."); if (vals.budget != null && !(Number.isFinite(Number(vals.budget)) && Number(vals.budget) >= 0 && Number(vals.budget) < 1e9)) return back(c, accPath(id), "Budget must be a number (USD)."); }
+  if (section === "owners") { if (!vals.owner_id || !x.users.some((u) => u.id === vals.owner_id)) return back(c, accPath(id), "Account owner is required."); if (vals.technical_owner_id && !isReviewerRole(x.users, s(vals.technical_owner_id))) return back(c, accPath(id), "Technical owner must be an engineer or delivery teammate, not sales."); if (!vals.technical_owner_id && a.sales_stage === "won") return back(c, accPath(id), "A won account keeps a technical owner; reassign instead of clearing."); }
+  if (section === "renewal") { if (vals.renewal_date && !isDate(s(vals.renewal_date))) return back(c, accPath(id, "delivery"), "Renewal date must be YYYY-MM-DD."); if (vals.renewal_notice_days != null && !(/^\d{1,3}$/.test(s(vals.renewal_notice_days)) && Number(vals.renewal_notice_days) <= 365)) return back(c, accPath(id, "delivery"), "Notice period must be a whole number of days (0-365)."); }
   if (section === "health") { if (!["unknown", "healthy", "watch", "at_risk"].includes(s(vals.health))) return back(c, accPath(id), "Pick a health value."); if (vals.health !== "unknown" && !vals.health_reason) return back(c, accPath(id), "A health assessment needs a reason."); vals.health_reviewed_at = nowISO(); }
   const keys = Object.keys(vals);
   const st: Stmt[] = [{ sql: `UPDATE cc2_accounts SET ${keys.map((k) => k + "=?").join(",")}, version=version+1, updated_at=? WHERE id=?`, args: [...keys.map((k) => vals[k]), nowISO(), id] }, act(id, s(x.me?.id) || null, section === "health" ? "health_assessed" : "account_edited", { section, ...vals })];
@@ -166,7 +188,8 @@ app.post("/accounts/:id/edit/:section", async (c) => {
 app.post("/accounts/:id/meetings", async (c) => {
   const x = await ctx(c), id = c.req.param("id"), f = await c.req.parseBody() as Body;
   const a = await loadAccount(d, id); if (!a) return c.notFound();
-  const date = isDate(str(f, "date")) ? str(f, "date") : x.today;
+  const df = dateField(f, "date", x.today); if (!df.ok) return back(c, accPath(id, "overview", "log"), "Meeting date must be a real date (YYYY-MM-DD).");
+  const date = df.value!; if (date > x.today) return back(c, accPath(id, "overview", "log"), "Meeting date cannot be in the future.");
   if (!str(f, "summary")) return back(c, accPath(id, "overview", "log"), "A meeting needs a one-line summary.");
   const st: Stmt[] = [
     { sql: "INSERT INTO cc2_meetings(id,account_id,occurred_at,summary,author_id,created_at) VALUES (?,?,?,?,?,?)", args: [uuid(), id, date + "T12:00:00.000Z", str(f, "summary"), s(x.me?.id) || null, nowISO()] },
@@ -175,8 +198,9 @@ app.post("/accounts/:id/meetings", async (c) => {
   ];
   if (str(f, "action_title")) {
     const due = isDate(str(f, "action_due")) ? str(f, "action_due") : null;
-    if (!due) return back(c, accPath(id, "overview", "log"), "The follow-up action needs a due date.");
-    st.push({ sql: "INSERT INTO cc2_tasks(id,account_id,title,type,owner_id,due_date,status,committed,created_by,created_at,updated_at) VALUES (?,?,?,'action',?,?,'open',0,?,?,?)", args: [uuid(), id, str(f, "action_title"), nul(f, "action_owner") ?? s(a.owner_id), due, s(x.me?.id) || null, nowISO(), nowISO()] });
+    if (!due) return back(c, accPath(id, "overview", "log"), "The follow-up action needs a valid due date.");
+    const owner = validUser(x.users, str(f, "action_owner")) ? str(f, "action_owner") : s(a.owner_id);
+    st.push({ sql: "INSERT INTO cc2_tasks(id,account_id,title,type,owner_id,due_date,status,committed,customer_side,created_by,created_at,updated_at) VALUES (?,?,?,'action',?,?,'open',0,?,?,?,?)", args: [uuid(), id, str(f, "action_title"), owner, due, str(f, "action_customer_side") ? 1 : 0, s(x.me?.id) || null, nowISO(), nowISO()] });
   }
   await d.tx(st);
   return back(c, accPath(id, "overview"), undefined, true);
@@ -192,9 +216,10 @@ app.post("/accounts/:id/tasks", async (c) => {
   const due = str(f, "due_date"); if (due && !isDate(due)) return back(c, accPath(id, tab, "add-action"), "Due date must be YYYY-MM-DD.");
   const committed = type === "milestone" ? (str(f, "committed") === "0" ? 0 : 1) : (str(f, "committed") ? 1 : 0);
   if (committed && !due) return back(c, accPath(id, tab, "add-action"), "A customer commitment needs a due date.");
+  const customerSide = type === "action" && str(f, "customer_side") ? 1 : 0; if (customerSide && !due) return back(c, accPath(id, tab, "add-action"), "Waiting on the customer needs the date you expect them by.");
   const owner = str(f, "owner_id") && x.users.some((u) => u.id === str(f, "owner_id")) ? str(f, "owner_id") : s(a.owner_id);
   await d.tx([
-    { sql: "INSERT INTO cc2_tasks(id,account_id,title,type,owner_id,due_date,status,committed,required,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,'open',?,?,?,?,?)", args: [uuid(), id, str(f, "title"), type, owner, due || null, committed, type === "milestone" ? (str(f, "required") === "0" ? 0 : 1) : 0, s(x.me?.id) || null, nowISO(), nowISO()] },
+    { sql: "INSERT INTO cc2_tasks(id,account_id,title,type,owner_id,due_date,status,committed,required,customer_side,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,'open',?,?,?,?,?,?)", args: [uuid(), id, str(f, "title"), type, owner, due || null, customerSide ? 0 : committed, type === "milestone" ? (str(f, "required") === "0" ? 0 : 1) : 0, customerSide, s(x.me?.id) || null, nowISO(), nowISO()] },
     act(id, s(x.me?.id) || null, "task_created", { type, title: str(f, "title"), committed }),
   ]);
   return back(c, accPath(id, tab), undefined, true);
@@ -225,7 +250,7 @@ app.post("/accounts/:id/blockers", async (c) => {
   const x = await ctx(c), id = c.req.param("id"), f = await c.req.parseBody() as Body;
   const a = await loadAccount(d, id); if (!a) return c.notFound();
   if (!str(f, "description")) return back(c, accPath(id, "delivery"), "A blocker needs a description.");
-  await d.tx([{ sql: "INSERT INTO cc2_blockers(id,account_id,description,owner_id,opened_at) VALUES (?,?,?,?,?)", args: [uuid(), id, str(f, "description"), nul(f, "owner_id") ?? s(a.technical_owner_id || a.owner_id), nowISO()] }, act(id, s(x.me?.id) || null, "blocker_opened", { description: str(f, "description") })]);
+  await d.tx([{ sql: "INSERT INTO cc2_blockers(id,account_id,description,owner_id,opened_at) VALUES (?,?,?,?,?)", args: [uuid(), id, str(f, "description"), validUser(x.users, str(f, "owner_id")) ? str(f, "owner_id") : s(a.technical_owner_id || a.owner_id), x.today + "T12:00:00.000Z"] }, act(id, s(x.me?.id) || null, "blocker_opened", { description: str(f, "description") })]);
   return back(c, accPath(id, "delivery"), undefined, true);
 });
 app.post("/blockers/:id/resolve", async (c) => {
@@ -246,6 +271,10 @@ app.post("/accounts/:id/proposals", async (c) => {
   const vals: Record<string, Arg> = {};
   for (const k of MATERIAL) vals[k] = k === "success_target" ? num(f, k) : nul(f, k);
   if (!vals.deliverables) return back(c, accPath(id, "scope", "proposal"), "A proposal needs deliverables.");
+  if (str(f, "success_target") && vals.success_target == null) return back(c, accPath(id, "scope", "proposal"), "Success target must be a number.");
+  if (vals.success_direction && !["higher", "lower"].includes(s(vals.success_direction))) return back(c, accPath(id, "scope", "proposal"), "Direction must be higher or lower.");
+  if ((handling.external_processing && !["yes", "no"].includes(handling.external_processing)) || (handling.retention && !["none", "custom"].includes(handling.retention)) || (handling.training_use && !["yes", "no"].includes(handling.training_use)) || handling.activities.some((k) => !(ACTIVITIES as readonly string[]).includes(k))) return back(c, accPath(id, "scope", "proposal"), "Data handling fields accept only the listed values.");
+  if (str(f, "shared") && str(f, "shared_at") && !isDate(str(f, "shared_at"))) return back(c, accPath(id, "scope", "proposal"), "Shared date must be a real date.");
   if (!vals.success_metric) return back(c, accPath(id, "scope", "proposal"), "A proposal needs a success criterion (metric and target).");
   const changedMaterial = prev ? MATERIAL.filter((k) => s(prev[k]) !== s(vals[k])) : MATERIAL;
   const handlingChanged = !prev || JSON.stringify(handlingOf(prev)) !== JSON.stringify(JSON.parse(JSON.stringify(handling)));
@@ -281,6 +310,9 @@ app.post("/accounts/:id/requirements", async (c) => {
     ? { wording: nul(f, "wording"), activities: JSON.stringify(arr(f, "activities")), external_processing: str(f, "external_processing") || "unknown", retention: str(f, "retention") || "unknown", retention_note: nul(f, "retention_note"), training_use: str(f, "training_use") || "unknown", evidence_note: nul(f, "evidence_note") }
     : { wording: null, activities: "[]", external_processing: null, retention: null, retention_note: null, training_use: null, evidence_note: nul(f, "evidence_note") };
   if (status === "specified" && !vals.wording) return back(c, accPath(id, "scope", "requirements"), "Specified restrictions need the customer's exact wording.");
+  if (status === "specified" && (!["yes", "no", "unknown"].includes(s(vals.external_processing)) || !["none", "custom", "unknown"].includes(s(vals.retention)) || !["yes", "no", "unknown"].includes(s(vals.training_use)) || arr(f, "activities").some((k) => !(ACTIVITIES as readonly string[]).includes(k)))) return back(c, accPath(id, "scope", "requirements"), "Restriction fields accept only the listed values.");
+  if (status === "none_stated" && !vals.evidence_note) return back(c, accPath(id, "scope", "requirements"), "'None stated' needs an evidence note (who said so, when).");
+  if (prev && prev.restriction_status === "specified" && status === "unknown") return back(c, accPath(id, "scope", "requirements"), "A recorded restriction cannot go back to unknown. If the customer withdrew it, record 'none stated' with evidence; otherwise revise the wording.");
   if (prev && prev.restriction_status === status && ["wording", "activities", "external_processing", "retention", "retention_note", "training_use", "evidence_note"].every((k) => s(prev[k]) === s((vals as Record<string, Arg>)[k]))) return back(c, accPath(id, "scope"), "Nothing changed; no new revision created.");
   const rev = prev ? Number(prev.revision) + 1 : 1, rid = uuid();
   const st: Stmt[] = [
@@ -302,6 +334,7 @@ app.post("/accounts/:id/reviews", async (c) => {
   const kind = Object.keys(REVIEW_KINDS).includes(str(f, "kind")) ? str(f, "kind") : "technical_validation";
   if (!r.rel.proposals.length && ["technical_validation", "data_handling"].includes(kind)) return back(c, accPath(id, "scope"), "Draft a proposal revision first; reviews bind to a revision.");
   const reviewer = str(f, "reviewer_id") && x.users.some((u) => u.id === str(f, "reviewer_id")) ? str(f, "reviewer_id") : null;
+  if (reviewer && ["technical_validation", "data_handling"].includes(kind) && !isReviewerRole(x.users, reviewer)) return back(c, accPath(id, "scope"), "Technical and data reviews are decided by an engineer or delivery teammate, not sales.");
   await d.tx(await requestReview(r.a, r.rel, kind, str(f, "question"), reviewer, s(x.me?.id) || null, null, x.today));
   return back(c, accPath(id, "scope"), undefined, true);
 });
@@ -316,6 +349,8 @@ app.post("/reviews/:id/decide", async (c) => {
   const rv = await d.get("SELECT * FROM cc2_reviews WHERE id=?", [id]); if (!rv) return c.notFound();
   if (versionMismatch(rv, f)) return back(c, `/reviews/${id}`, "This review changed since you opened it (another decision or a reopen). Reload and retry.");
   if (rv.status !== "open") return back(c, `/reviews/${id}`, "This review is not open.");
+  if (s(rv.reviewer_id) && s(rv.reviewer_id) !== s(x.me?.id)) return back(c, `/reviews/${id}`, "Only the assigned reviewer can decide this review. Reassign it first if that should change.");
+  if (["technical_validation", "data_handling"].includes(s(rv.kind)) && !isReviewerRole(x.users, s(x.me?.id))) return back(c, `/reviews/${id}`, "Technical and data reviews are decided by an engineer or delivery teammate, not sales.");
   const status = ["approved", "conditional", "blocked"].includes(str(f, "status")) ? str(f, "status") : "";
   if (!status) return back(c, `/reviews/${id}`, "Choose Approved, Approved with conditions, or Blocked.");
   if (!str(f, "decision_note")) return back(c, `/reviews/${id}`, "Add a short explanation.");
@@ -377,7 +412,7 @@ app.post("/accounts/:id/end", async (c) => {
   const a = await loadAccount(d, id); if (!a) return c.notFound();
   if (!a.delivery_status || a.delivery_status === "ended") return back(c, accPath(id), "Only won engagements can be ended.");
   if (!str(f, "reason")) return back(c, accPath(id, "delivery"), "Ending needs an outcome/reason.");
-  const date = isDate(str(f, "ended_at")) ? str(f, "ended_at") : x.today;
+  const ef = dateField(f, "ended_at", x.today); if (!ef.ok) return back(c, accPath(id, "delivery"), "End date must be a real date."); const date = ef.value!;
   await d.tx([{ sql: "UPDATE cc2_accounts SET delivery_status='ended', end_reason=?, ended_at=?, version=version+1, updated_at=? WHERE id=?", args: [str(f, "reason"), date, nowISO(), id] }, act(id, s(x.me?.id) || null, "engagement_ended", { reason: str(f, "reason"), date })]);
   return back(c, accPath(id, "delivery"), undefined, true);
 });
@@ -391,7 +426,7 @@ app.post("/accounts/:id/agreements", async (c) => {
   const p = latest(rel.proposals), req = latest(rel.requirements);
   if (!p) return back(c, accPath(id, "scope"), "No proposal revision to accept.");
   if (!str(f, "evidence")) return back(c, accPath(id, "scope", "confirm"), "Acceptance needs a note or document link. A typed note is recorded as a claim, not verified acceptance.");
-  const date = isDate(str(f, "accepted_at")) ? str(f, "accepted_at") : x.today;
+  const af = dateField(f, "accepted_at", x.today); if (!af.ok || af.value! > x.today) return back(c, accPath(id, "scope", "confirm"), "Acceptance date must be a real date, not in the future."); const date = af.value!;
   const amendment = !!a.current_agreement_id;
   if (!amendment && a.sales_stage !== "negotiation") return back(c, accPath(id, "scope"), "Agreements are confirmed from Negotiation.");
   if (rel.agreements.some((g) => g.proposal_id === p.id)) return back(c, accPath(id, "scope"), `Proposal rev ${p.revision} is already the accepted agreement.`);
@@ -435,7 +470,7 @@ app.post("/accounts/:id/outcome", async (c) => {
   if (o && versionMismatch(o, f)) return back(c, accPath(id, "delivery"), "The outcome record changed since you opened it. Reload and retry.");
   const metric = str(f, "metric") || s(o?.metric); if (!metric) return back(c, accPath(id, "delivery"), "Name the success metric.");
   for (const k of ["baseline", "target", "latest"]) if (str(f, k) && num(f, k) == null) return back(c, accPath(id, "delivery"), `${k} must be a number (leave blank if unknown).`);
-  const latestV = num(f, "latest"), measured = isDate(str(f, "measured_at")) ? str(f, "measured_at") : (latestV != null ? x.today : null);
+  const latestV = num(f, "latest"); const mf = dateField(f, "measured_at", latestV != null ? x.today : null); if (!mf.ok || (mf.value && mf.value > x.today)) return back(c, accPath(id, "delivery", "outcome"), "Measured-on must be a real date, not in the future."); const measured = mf.value;
   const vals: Arg[] = [metric, nul(f, "unit"), str(f, "direction") === "lower" ? "lower" : "higher", num(f, "baseline"), nul(f, "baseline_basis"), num(f, "target"), latestV, latestV != null ? nul(f, "latest_basis") : null, measured, latestV == null ? nul(f, "not_measured_reason") : null];
   const st: Stmt[] = o
     ? [{ sql: "UPDATE cc2_outcomes SET metric=?, unit=?, direction=?, baseline=?, baseline_basis=?, target=?, latest=?, latest_basis=?, measured_at=?, not_measured_reason=?, version=version+1, updated_at=? WHERE account_id=?", args: [...vals, nowISO(), id] }]
