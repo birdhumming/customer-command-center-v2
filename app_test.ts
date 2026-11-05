@@ -166,3 +166,48 @@ Deno.test("review findings: waiting on customer is not stalled; renewal notice p
   const at = await acc("Atlas Commerce");
   page = await get(`/accounts/${at.id}/handoff`); assertMatch(page.text, /Changed before acceptance/);
 });
+Deno.test("revops findings: existing-customer backfill, unowned action flagged, review history kept, price-only carries approvals, blocked review gates Proposal, admin passcode", async () => {
+  // backfill Thistle & Vine as an active customer with a 60-day notice clause
+  let r = await post("/accounts", { name: "Thistle & Vine", owner_id: U.Priya, contact: "Imogen", existing: "1", ex_deliverables: "Quarterly eval of the sommelier agent", ex_price_terms: "$36k/yr", ex_success_metric: "Wrong-pairing rate", ex_success_target: "5", ex_success_unit: "%", ex_success_direction: "lower", ex_technical_owner_id: U.Leo, ex_evidence: "Order form TV-2 signed 2026-03-01", ex_started: "2026-03-01", ex_renewal_date: addDays(today, 50), ex_notice_days: "60" }, U.Priya);
+  assertEquals(r.status, 302, r.text.slice(0, 300));
+  const tv = await acc("Thistle & Vine"); assertEquals(tv.sales_stage, "won"); assertEquals(tv.delivery_status, "active"); assert(tv.current_agreement_id);
+  let page = await get(`/accounts/${tv.id}`); assertMatch(page.text, /Renewal notice deadline 10d overdue/); assertMatch(page.text, /data restrictions unknown/);
+  page = await get(`/accounts/${tv.id}/handoff`); assertMatch(page.text, /Backfilled existing engagement/);
+  // sales cannot be the backfilled technical owner; validation errors re-render the form with input kept
+  r = await post("/accounts", { name: "Bad Backfill", owner_id: U.Maya, existing: "1", ex_deliverables: "x", ex_price_terms: "y", ex_success_metric: "m", ex_success_target: "1", ex_technical_owner_id: U.Maya, ex_evidence: "e", ex_started: "2026-01-01" });
+  assertEquals(r.status, 400); assertMatch(r.text, /engineer or delivery teammate/); assertMatch(r.text, /value="Bad Backfill"/);
+  // unowned action is recorded as unowned and flagged, not given to the account owner
+  r = await post(`/accounts/${tv.id}/tasks`, { title: "Expansion ask: second agent", owner_id: "", due_date: addDays(today, 7) }, U.Priya); assertEquals(r.status, 302, r.err);
+  assertEquals((await d.get("SELECT owner_id FROM cc2_tasks WHERE title='Expansion ask: second agent'"))!.owner_id, null);
+  page = await get(`/accounts/${tv.id}`); assertMatch(page.text, /Unowned action: Expansion ask/);
+  assertMatch((await post(`/accounts/${tv.id}/tasks`, { title: "c", owner_id: "", due_date: today, committed: "1" }, U.Priya)).err, /needs an owner/);
+  // measurement series: two measurements are both kept
+  const o = (await d.get("SELECT * FROM cc2_outcomes WHERE account_id=?", [tv.id]))! as Record<string, string>;
+  await post(`/accounts/${tv.id}/outcome`, { metric: o.metric, unit: "%", direction: "lower", baseline: "12", baseline_basis: "v3 index", target: "5", latest: "7", latest_basis: "v3 index", version: String(o.version) }, U.Priya);
+  await post(`/accounts/${tv.id}/outcome`, { metric: o.metric, unit: "%", direction: "lower", baseline: "12", baseline_basis: "v3 index", target: "5", latest: "4", latest_basis: "v4 index", version: String(Number(o.version) + 1) }, U.Priya);
+  assertEquals(Number((await d.get("SELECT COUNT(*) c FROM cc2_measurements WHERE account_id=?", [tv.id]))!.c), 2);
+  page = await get(`/accounts/${tv.id}?tab=delivery`); assertMatch(page.text, /Measurement history \(2\)/); assertMatch(page.text, /differs from baseline basis/);
+  // review history: Harbor's data review was decided then reopened earlier in this run -> earlier decision kept
+  const hb = await acc("Harbor Operations");
+  const rv = (await d.get("SELECT * FROM cc2_reviews WHERE account_id=? AND kind='data_handling'", [hb.id]))! as Record<string, string>;
+  assertMatch(rv.history, /"status":"approved"/);
+  page = await get(`/reviews/${rv.id}`, U.Priya); assertMatch(page.text, /Earlier decisions on this review/);
+  // blocked data review gates Discovery -> Proposal
+  const ns = await acc("Northstar Support");
+  const nrv = (await d.get("SELECT * FROM cc2_reviews WHERE account_id=? AND kind='data_handling'", [ns.id]))! as Record<string, string>;
+  assertEquals((await post(`/reviews/${nrv.id}/decide`, { status: "blocked", decision_note: "ZDR forbids the grader audit log", version: String(nrv.version) }, U.Leo)).status, 302);
+  assertMatch((await stage(ns.id, "proposal")).err, /No review blocked/);
+  // price-only revision carries approvals forward instead of going stale
+  const cd = await acc("Cedar Analytics");
+  await post(`/accounts/${cd.id}/reviews`, { kind: "technical_validation", reviewer_id: U.Leo, question: "ok?" }, U.Priya);
+  const crv = (await d.get("SELECT * FROM cc2_reviews WHERE account_id=? AND kind='technical_validation'", [cd.id]))! as Record<string, string>;
+  await post(`/reviews/${crv.id}/decide`, { status: "approved", decision_note: "fine", version: String(crv.version) }, U.Leo);
+  const cp = (await d.get("SELECT * FROM cc2_proposals WHERE account_id=? ORDER BY revision DESC", [cd.id]))! as Record<string, string>;
+  const h = JSON.parse(cp.handling || "{}");
+  r = await post(`/accounts/${cd.id}/proposals`, { deliverables: cp.deliverables, exclusions: cp.exclusions ?? "", price_terms: cp.price_terms + " (+5% uplift)", dates: cp.dates ?? "", customer_responsibilities: cp.customer_responsibilities ?? "", success_metric: cp.success_metric, success_unit: cp.success_unit ?? "", success_direction: cp.success_direction, success_target: cp.success_target, success_basis: cp.success_basis ?? "", h_external: h.external_processing ?? "", h_processors: (h.external_processors ?? []).join(","), h_retention: h.retention ?? "", h_retention_note: h.retention_note ?? "", h_training: h.training_use ?? "", ...Object.fromEntries((h.activities ?? []).map((a: string) => ["h_activities[]", a])), change_note: "price only" }, U.Priya);
+  assertEquals(r.status, 302, r.err);
+  const after = (await d.get("SELECT r.proposal_id, p.revision FROM cc2_reviews r JOIN cc2_proposals p ON p.id=r.proposal_id WHERE r.id=?", [crv.id]))!;
+  assertEquals(Number(after.revision), Number(cp.revision) + 1);
+  // reseed needs the admin passcode, not the team passcode
+  const rs = await fetchApp(new Request("http://x/admin/reseed", { method: "POST", headers: { cookie }, body: new URLSearchParams({ passcode: "evalhouse" }) })); assertEquals(rs.status, 401);
+});

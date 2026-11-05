@@ -5,12 +5,13 @@ import { deleteCookie, getCookie, setCookie } from "npm:hono@4.6.14/cookie";
 import { type Arg, db as getDB, nowISO, type Row, type Stmt, uuid } from "./db.ts";
 import { seed } from "./seed.ts";
 import { activity, loadAccount, loadAccounts, loadRelated, todayISO, users as loadUsers } from "./data.ts";
-import { ACTIVITIES, conflicts, evaluateAccount, handlingOf, isOpenAccount, isPresales, latest, readinessFor, REVIEW_KINDS, s, STAGE_LABEL, type Related } from "./rules.ts";
+import { ACTIVITIES, conflicts, parseJSON, evaluateAccount, handlingOf, isOpenAccount, isPresales, latest, readinessFor, REVIEW_KINDS, s, STAGE_LABEL, type Related } from "./rules.ts";
 import * as V from "./views.ts";
 
 const d = await getDB();
 await seed(d);
 const PASSCODE = Deno.env.get("CCC_PASSCODE") ?? "evalhouse";
+const ADMIN_PASSCODE = Deno.env.get("CCC_ADMIN_PASSCODE") ?? PASSCODE + "-admin";
 const AUTH = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode("ccc2:" + PASSCODE)))).map((b) => b.toString(16).padStart(2, "0")).join("");
 const app = new Hono();
 
@@ -109,7 +110,10 @@ async function requestReview(a: Row, rel: Related, kind: string, question: strin
     st.push({ sql: "UPDATE cc2_reviews SET proposal_id=?, requirements_id=?, reopened_reason=COALESCE(?, reopened_reason), question=COALESCE(NULLIF(?, ''), question), reviewer_id=COALESCE(?, reviewer_id), version=version+1 WHERE id=?", args: [s(p?.id) || null, s(req?.id) || null, reopenedReason, question, reviewer, reviewId] });
   } else if (existing) {
     reviewId = s(existing.id);
-    st.push({ sql: "UPDATE cc2_reviews SET status='open', proposal_id=?, requirements_id=?, reopened_reason=?, question=COALESCE(NULLIF(?, ''), question), reviewer_id=COALESCE(?, reviewer_id), decided_at=NULL, version=version+1 WHERE id=?", args: [s(p?.id) || null, s(req?.id) || null, reopenedReason ?? "re-requested", question, reviewer, reviewId] });
+    // the earlier decision is kept, not overwritten
+    const hist = parseJSON<Row[]>(existing.history, []);
+    hist.push({ status: existing.status, decision_note: existing.decision_note, conditions: existing.conditions, decided_at: existing.decided_at, reviewer_id: existing.reviewer_id, proposal_id: existing.proposal_id, requirements_id: existing.requirements_id, reopened_for: reopenedReason ?? "re-requested" });
+    st.push({ sql: "UPDATE cc2_reviews SET status='open', proposal_id=?, requirements_id=?, reopened_reason=?, question=COALESCE(NULLIF(?, ''), question), reviewer_id=COALESCE(?, reviewer_id), decided_at=NULL, conditions='[]', decision_note=NULL, history=?, version=version+1 WHERE id=?", args: [s(p?.id) || null, s(req?.id) || null, reopenedReason ?? "re-requested", question, reviewer, JSON.stringify(hist), reviewId] });
   } else {
     reviewId = uuid();
     st.push({ sql: "INSERT INTO cc2_reviews(id,account_id,kind,question,proposal_id,requirements_id,reviewer_id,status,requested_by,requested_at) VALUES (?,?,?,?,?,?,?,'open',?,?)", args: [reviewId, s(a.id), kind, question, s(p?.id) || null, s(req?.id) || null, reviewer, byId, nowISO()] });
@@ -145,10 +149,34 @@ app.post("/accounts", async (c) => {
   const draft = { name: str(f, "name"), owner_id: str(f, "owner_id"), contact: str(f, "contact"), problem: str(f, "problem") };
   if (!draft.name) return page(c, x, "Add account", V.newAccountForm(x, draft, { name: "Account name is required." }), 400);
   if (!draft.owner_id || !x.users.some((u) => u.id === draft.owner_id)) return page(c, x, "Add account", V.newAccountForm(x, draft, { owner_id: "Pick an account owner." }), 400);
-  const id = uuid();
+  const id = uuid(), by = s(x.me?.id) || null;
+  if (str(f, "existing") === "1") {
+    // Backfill an existing customer: the contract of record becomes rev 1 + agreement snapshot; no handoff is generated.
+    const ex = { deliverables: str(f, "ex_deliverables"), price_terms: str(f, "ex_price_terms"), success_metric: str(f, "ex_success_metric"), success_target: num(f, "ex_success_target"), success_unit: str(f, "ex_success_unit"), success_direction: str(f, "ex_success_direction") === "lower" ? "lower" : "higher", technical_owner_id: str(f, "ex_technical_owner_id"), evidence: str(f, "ex_evidence"), started: str(f, "ex_started"), renewal_date: str(f, "ex_renewal_date"), notice: str(f, "ex_notice_days"), status: str(f, "ex_status") === "delivery" ? "delivery" : "active" };
+    const errs: Record<string, string> = {};
+    if (!ex.deliverables) errs.ex_deliverables = "What was agreed, in the contract's words.";
+    if (!ex.price_terms) errs.ex_price_terms = "Price / payment terms as contracted.";
+    if (!ex.success_metric || ex.success_target == null) errs.ex_success_metric = "Metric and numeric target are required.";
+    if (!isReviewerRole(x.users, ex.technical_owner_id)) errs.ex_technical_owner_id = "Pick the engineer or delivery teammate who owns it.";
+    if (!ex.evidence) errs.ex_evidence = "Contract reference (order form, DocuSign, date).";
+    if (!ex.started || !isDate(ex.started) || ex.started > x.today) errs.ex_started = "Start date must be a real past date.";
+    if (ex.renewal_date && !isDate(ex.renewal_date)) errs.ex_renewal_date = "YYYY-MM-DD.";
+    if (ex.notice && !(/^\d{1,3}$/.test(ex.notice) && Number(ex.notice) <= 365)) errs.ex_notice_days = "Whole days, 0-365.";
+    if (Object.keys(errs).length) return page(c, x, "Add account", V.newAccountForm(x, { ...draft, existing: "1", ...Object.fromEntries(Object.entries(f).filter(([k]) => k.startsWith("ex_")).map(([k, v]) => [k, String(v)])) }, errs), 400);
+    const pid = uuid(), gid = uuid(), ts = ex.started + "T12:00:00.000Z";
+    await d.tx([
+      { sql: "INSERT INTO cc2_accounts(id,name,owner_id,technical_owner_id,contact,problem,sales_stage,delivery_status,renewal_date,renewal_notice_days,current_agreement_id,buyer_status,created_at,updated_at) VALUES (?,?,?,?,?,?,'won',?,?,?,NULL,'not_assessed',?,?)", args: [id, draft.name, draft.owner_id, ex.technical_owner_id, draft.contact || null, draft.problem || null, ex.status, ex.renewal_date || null, ex.notice ? Number(ex.notice) : null, nowISO(), nowISO()] },
+      { sql: "INSERT INTO cc2_proposals(id,account_id,revision,deliverables,price_terms,success_metric,success_unit,success_direction,success_target,handling,shared_at,validation_waived_reason,change_note,created_by,created_at) VALUES (?,?,1,?,?,?,?,?,?,'{}',?,?,?,?,?)", args: [pid, id, ex.deliverables, ex.price_terms, ex.success_metric, ex.success_unit || null, ex.success_direction, ex.success_target, ex.started, "backfilled existing engagement; validation predates this record", "Backfilled from the existing contract", by, nowISO()] },
+      { sql: "INSERT INTO cc2_agreements(id,account_id,proposal_id,requirements_id,accepted_by,accepted_at,acceptance_evidence,supersedes_id,created_at) VALUES (?,?,?,NULL,?,?,?,NULL,?)", args: [gid, id, pid, by, ts, `Backfilled existing contract: ${ex.evidence}`, nowISO()] },
+      { sql: "UPDATE cc2_accounts SET current_agreement_id=? WHERE id=?", args: [gid, id] },
+      { sql: "INSERT INTO cc2_outcomes(id,account_id,agreement_id,metric,unit,direction,target,updated_at) VALUES (?,?,?,?,?,?,?,?)", args: [uuid(), id, gid, ex.success_metric, ex.success_unit || null, ex.success_direction, ex.success_target, nowISO()] },
+      act(id, by, "account_backfilled", { name: draft.name, evidence: ex.evidence, status: ex.status }),
+    ]);
+    return back(c, accPath(id, "delivery"), undefined, true);
+  }
   await d.tx([
     { sql: "INSERT INTO cc2_accounts(id,name,owner_id,contact,problem,sales_stage,created_at,updated_at) VALUES (?,?,?,?,?,'discovery',?,?)", args: [id, draft.name, draft.owner_id, draft.contact || null, draft.problem || null, nowISO(), nowISO()] },
-    act(id, s(x.me?.id) || null, "account_created", { name: draft.name }),
+    act(id, by, "account_created", { name: draft.name }),
   ]);
   return back(c, accPath(id), undefined, true);
 });
@@ -175,7 +203,7 @@ app.post("/accounts/:id/edit/:section", async (c) => {
   if (section === "overview") { if (!["not_assessed", "unknown", "named"].includes(s(vals.buyer_status))) vals.buyer_status = "not_assessed"; if (vals.buyer_status === "named" && !vals.buyer) return back(c, accPath(id), "Buyer status is 'named' but no buyer name given."); if (vals.budget != null && !(Number.isFinite(Number(vals.budget)) && Number(vals.budget) >= 0 && Number(vals.budget) < 1e9)) return back(c, accPath(id), "Budget must be a number (USD)."); }
   if (section === "owners") { if (!vals.owner_id || !x.users.some((u) => u.id === vals.owner_id)) return back(c, accPath(id), "Account owner is required."); if (vals.technical_owner_id && !isReviewerRole(x.users, s(vals.technical_owner_id))) return back(c, accPath(id), "Technical owner must be an engineer or delivery teammate, not sales."); if (!vals.technical_owner_id && a.sales_stage === "won") return back(c, accPath(id), "A won account keeps a technical owner; reassign instead of clearing."); }
   if (section === "renewal") { if (vals.renewal_date && !isDate(s(vals.renewal_date))) return back(c, accPath(id, "delivery"), "Renewal date must be YYYY-MM-DD."); if (vals.renewal_notice_days != null && !(/^\d{1,3}$/.test(s(vals.renewal_notice_days)) && Number(vals.renewal_notice_days) <= 365)) return back(c, accPath(id, "delivery"), "Notice period must be a whole number of days (0-365)."); }
-  if (section === "health") { if (!["unknown", "healthy", "watch", "at_risk"].includes(s(vals.health))) return back(c, accPath(id), "Pick a health value."); if (vals.health !== "unknown" && !vals.health_reason) return back(c, accPath(id), "A health assessment needs a reason."); vals.health_reviewed_at = nowISO(); }
+  if (section === "health") { if (!["unknown", "healthy", "watch", "at_risk"].includes(s(vals.health))) return back(c, accPath(id), "Pick a health value."); if (vals.health !== "unknown" && !vals.health_reason) return back(c, accPath(id), "A health assessment needs a reason."); vals.health_reviewed_at = x.today; }
   const keys = Object.keys(vals);
   const st: Stmt[] = [{ sql: `UPDATE cc2_accounts SET ${keys.map((k) => k + "=?").join(",")}, version=version+1, updated_at=? WHERE id=?`, args: [...keys.map((k) => vals[k]), nowISO(), id] }, act(id, s(x.me?.id) || null, section === "health" ? "health_assessed" : "account_edited", { section, ...vals })];
   // a new technical owner inherits open reviews that have no reviewer
@@ -199,7 +227,7 @@ app.post("/accounts/:id/meetings", async (c) => {
   if (str(f, "action_title")) {
     const due = isDate(str(f, "action_due")) ? str(f, "action_due") : null;
     if (!due) return back(c, accPath(id, "overview", "log"), "The follow-up action needs a valid due date.");
-    const owner = validUser(x.users, str(f, "action_owner")) ? str(f, "action_owner") : s(a.owner_id);
+    const owner = validUser(x.users, str(f, "action_owner")) ? str(f, "action_owner") : ("action_owner" in f ? null : s(a.owner_id));
     st.push({ sql: "INSERT INTO cc2_tasks(id,account_id,title,type,owner_id,due_date,status,committed,customer_side,created_by,created_at,updated_at) VALUES (?,?,?,'action',?,?,'open',0,?,?,?,?)", args: [uuid(), id, str(f, "action_title"), owner, due, str(f, "action_customer_side") ? 1 : 0, s(x.me?.id) || null, nowISO(), nowISO()] });
   }
   await d.tx(st);
@@ -217,7 +245,9 @@ app.post("/accounts/:id/tasks", async (c) => {
   const committed = type === "milestone" ? (str(f, "committed") === "0" ? 0 : 1) : (str(f, "committed") ? 1 : 0);
   if (committed && !due) return back(c, accPath(id, tab, "add-action"), "A customer commitment needs a due date.");
   const customerSide = type === "action" && str(f, "customer_side") ? 1 : 0; if (customerSide && !due) return back(c, accPath(id, tab, "add-action"), "Waiting on the customer needs the date you expect them by.");
-  const owner = str(f, "owner_id") && x.users.some((u) => u.id === str(f, "owner_id")) ? str(f, "owner_id") : s(a.owner_id);
+  // blank owner is recorded as unowned (and flagged), never silently given to the account owner
+  const owner = validUser(x.users, str(f, "owner_id")) ? str(f, "owner_id") : ("owner_id" in f ? null : s(a.owner_id));
+  if (committed && !owner) return back(c, accPath(id, tab, "add-action"), "A commitment needs an owner.");
   await d.tx([
     { sql: "INSERT INTO cc2_tasks(id,account_id,title,type,owner_id,due_date,status,committed,required,customer_side,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,'open',?,?,?,?,?,?)", args: [uuid(), id, str(f, "title"), type, owner, due || null, customerSide ? 0 : committed, type === "milestone" ? (str(f, "required") === "0" ? 0 : 1) : 0, customerSide, s(x.me?.id) || null, nowISO(), nowISO()] },
     act(id, s(x.me?.id) || null, "task_created", { type, title: str(f, "title"), committed }),
@@ -286,6 +316,8 @@ app.post("/accounts/:id/proposals", async (c) => {
     { sql: `INSERT INTO cc2_proposals(id,account_id,revision,${MATERIAL.join(",")},handling,shared_at,validation_waived_reason,change_note,created_by,created_at) VALUES (?,?,?,${MATERIAL.map(() => "?").join(",")},?,?,?,?,?,?)`, args: [pid, id, rev, ...MATERIAL.map((k) => vals[k]), JSON.stringify(handling), sharedAt, waived, nul(f, "change_note"), s(x.me?.id) || null, nowISO()] },
     act(id, s(x.me?.id) || null, "proposal_revised", { revision: rev, changed: changedMaterial, handling_changed: handlingChanged, change_note: str(f, "change_note") }),
   ];
+  // price/dates-only change: approvals are about scope and handling, so they carry forward instead of going stale without a task
+  if (prev && !handlingChanged && changedMaterial.length && changedMaterial.every((k) => ["price_terms", "dates"].includes(k))) st.push({ sql: "UPDATE cc2_reviews SET proposal_id=? WHERE account_id=? AND proposal_id=? AND status IN ('approved','conditional')", args: [pid, id, s(prev.id)] }, act(id, s(x.me?.id) || null, "approvals_carried_forward", { revision: rev, changed: changedMaterial }));
   // material change -> reopen applicable reviews, bound to the new revision
   const scopeChanged = changedMaterial.some((k) => ["deliverables", "exclusions", "success_metric", "success_basis"].includes(k));
   if (prev && (scopeChanged || handlingChanged)) {
@@ -475,16 +507,17 @@ app.post("/accounts/:id/outcome", async (c) => {
   const st: Stmt[] = o
     ? [{ sql: "UPDATE cc2_outcomes SET metric=?, unit=?, direction=?, baseline=?, baseline_basis=?, target=?, latest=?, latest_basis=?, measured_at=?, not_measured_reason=?, version=version+1, updated_at=? WHERE account_id=?", args: [...vals, nowISO(), id] }]
     : [{ sql: "INSERT INTO cc2_outcomes(id,account_id,agreement_id,metric,unit,direction,baseline,baseline_basis,target,latest,latest_basis,measured_at,not_measured_reason,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", args: [uuid(), id, s(a.current_agreement_id) || null, ...vals, nowISO()] }];
-  if (latestV != null) st.push(closeTask("measurement", id));
+  if (latestV != null) st.push(closeTask("measurement", id), { sql: "INSERT INTO cc2_measurements(id,account_id,value,basis,measured_at,recorded_by,created_at) VALUES (?,?,?,?,?,?,?)", args: [uuid(), id, latestV, nul(f, "latest_basis"), measured, s(x.me?.id) || null, nowISO()] });
   st.push(act(id, s(x.me?.id) || null, "outcome_recorded", { latest: latestV, basis: str(f, "latest_basis") }));
   await d.tx(st);
   return back(c, accPath(id, "delivery"), undefined, true);
 });
 
 // Reset shared data to the seed; asks for the passcode again so it is not one click from wiping shared data.
+app.get("/admin", async (c) => page(c, await ctx(c), "Admin", V.adminPage()));
 app.post("/admin/reseed", async (c) => {
   const f = await c.req.parseBody() as Body;
-  if (str(f, "passcode") !== PASSCODE) return c.text("wrong passcode", 401);
+  if (str(f, "passcode") !== ADMIN_PASSCODE) return c.text("wrong admin passcode", 401);
   await seed(d, { force: true });
   return c.redirect("/?saved=1");
 });

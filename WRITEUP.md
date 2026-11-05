@@ -102,9 +102,22 @@ Held: stage skipping, Lost from Won, three concurrent Confirm agreement → one 
 
 Not fixed, by choice: meeting attendees (so "buyer never in a meeting" is still a note), a baseline field on the proposal (contested baselines live in `success_basis`), unresolved commercial terms as structured items (uncapped indemnity is prose in `price_terms`), amendments that widen scope at the same price are not flagged, and the three unconsumed review kinds remain selectable.
 
-### 7.2 RevOps working day
+### 7.2 RevOps working day — "No, not this quarter; fix three and I'd pilot it" before fixes
 
-_(pending)_
+| # | Finding | Severity | Fix |
+|---|---|---|---|
+| 1 | No way to enter an existing customer without faking a sale; Thistle's notice clause lived in the problem sentence | required | Add account has an "Existing customer" section: contract scope, price, success criterion, technical owner (non-sales), contract reference, start, renewal date and notice period → rev 1 + agreement snapshot marked backfilled, delivery status Active/Delivery, outcome seeded with the target; no handoff is generated; restrictions still unknown until recorded |
+| 2 | Unowned actions silently became the account owner's; reopening a review overwrote the previous decision and checked conditions | required | Blank owner is stored as unowned and raises "Unowned action"; a commitment must have an owner. Reopen appends the prior decision to `reviews.history`, shown on the review as "Earlier decisions (kept, not overwritten)" |
+| 3 | Seed reset behind the shared team passcode on a help page; rejected forms lost what was typed | required | Reset moved to `/admin` behind a separate `CCC_ADMIN_PASSCODE`. Rejected saves restore the typed values into the same form (fresh version from the server) and open the drawer |
+| 4 | Blocked data review did not gate Discovery → Proposal | high | "No review blocked" is a Discovery gate item |
+| 5 | Price-only revision made approvals stale with no task for Leo | high | Price/dates-only revisions carry approved/conditional reviews forward (logged); scope, success criterion and data-handling changes still reopen them |
+| 6 | "Shared with customer" pre-checked on the revision form, so new revisions were recorded as shared on a date they were not | high | Never pre-checked; Won now also requires the accepted revision to have a shared date |
+| 7 | New measurement overwrote the previous; no series, basis change lost the pre-swap number | high | Append-only `measurements`; history shown under Measured success with a "differs from baseline basis" marker; the outcome still has one operative latest value |
+| 8 | Health "reviewed" and other timestamps rendered in UTC against a Pacific today | low | Timestamps render as Pacific dates; health review date stored as the Pacific date |
+| 9 | Harbor "Ready for Delivery" with a blocker open 6 days | med | Not changed: an open blocker is a warning, not a gate; the team decides whether to start delivery around it |
+| 10 | Add account has no stakeholder list / legal asks / "contested baseline" flag | med | Not changed: stakeholders and open commercial terms stay in prose this version (see §9) |
+
+Confirmed working on the fixed build by the reviewer: "waiting on customer" (Halden), two-tab stale save rejected with the conflicting value kept, relative alert dates current on refresh, Healthy not hiding warnings, v4 measurement shown as not comparable.
 
 ## 8. Three bullets on design and tradeoffs
 

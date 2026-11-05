@@ -8,7 +8,7 @@ export interface Gap { label: string; ok: boolean; hint?: string; anchor?: strin
 export interface Readiness { from: string; to: string | null; toLabel: string | null; items: Gap[]; ready: boolean; via: "advance" | "confirm_agreement" | "end" | null }
 export interface Related {
   proposals: Row[]; requirements: Row[]; reviews: Row[]; agreements: Row[]; handoffs: Row[];
-  tasks: Row[]; meetings: Row[]; blockers: Row[]; outcome: Row | null; users: Row[];
+  tasks: Row[]; meetings: Row[]; blockers: Row[]; outcome: Row | null; users: Row[]; measurements?: Row[];
 }
 export interface Evaluation { signals: Signal[]; readiness: Readiness; nextStep: string; conflicts: string[]; agreementConflicts: string[] }
 
@@ -172,6 +172,7 @@ export function evaluateAccount(a: Row, rel: Related, today: string): Evaluation
       if (since >= STALLED_DAYS && !waiting.some((t) => !overdue(t, today))) sig("stalled_prospect", "warning", `No customer contact for ${since}d`, owner, "log_meeting");
       if (!a.budget && a.sales_stage !== "discovery") sig("budget_unknown", "warning", "Budget unknown", owner, "edit_account");
     }
+    for (const t of openTasks(rel).filter((t) => !t.owner_id && t.type !== "review")) sig("unowned_task", "warning", `Unowned ${t.type === "milestone" ? "milestone" : "action"}: ${t.title}`, owner, "open_account", s(t.id));
     if (!openTasks(rel).some((t) => t.due_date)) sig("missing_next_step", "warning", "No dated next step", owner, "add_action");
     if (a.delivery_status && rel.outcome && rel.outcome.baseline == null) sig("baseline_missing", "warning", "Success metric has no baseline", techOwner ?? owner, "record_outcome");
   }
@@ -214,6 +215,7 @@ export function readinessFor(a: Row, rel: Related, today: string, conf = conflic
     const unresolvedRestriction = !req || req.restriction_status === "unknown" || conf.length > 0 || clarifications(req, p).some((c) => !c.startsWith("proposed data handling"));
     if (p?.validation_waived_reason) need("Technical validation waived (allowed only with no unresolved data restriction)", !unresolvedRestriction, "record data restrictions first", "scope");
     else need("Technical validation approved for this revision", tv?.state === "satisfied", tv ? tv.why : "request technical validation or waive it with a reason", "approvals");
+    need("No review blocked", !states.some((x) => x.state === "blocked"), states.find((x) => x.state === "blocked")?.why, "approvals");
   } else if (stage === "proposal") {
     to = "negotiation";
     need("Proposal marked shared with a date", p?.shared_at, "mark the current revision as shared", "scope");
@@ -224,6 +226,7 @@ export function readinessFor(a: Row, rel: Related, today: string, conf = conflic
     need("Acceptance evidence and date recorded by a person", false, "use Confirm agreement", "scope");
     need("Agreed scope/terms and success criterion present", p && s(p.deliverables) && s(p.price_terms) && s(p.success_metric), undefined, "scope");
     need("Technical owner assigned", a.technical_owner_id, undefined, "overview");
+    need("Accepted revision was shared with the customer (date recorded)", p?.shared_at, "mark the revision as shared", "scope");
     need("Required reviews current and approved", states.length > 0 && reviewsCurrent, states.find((x) => x.state !== "satisfied")?.why ?? (states.length ? undefined : "no review requested"), "approvals");
     need("No explicit data conflict", conf.length === 0, conf[0], "approvals");
     need("Customer data restrictions recorded (unknown is not permission)", req && req.restriction_status !== "unknown", undefined, "requirements");

@@ -29,10 +29,11 @@ for (const f of files) {
   if (f === "main.ts") console.log("endpoint:", res?.links?.endpoint);
   console.log("uploaded", f, content.length);
 }
-if (argv.passcode) {
-  try { await api("POST", `/v2/vals/${id}/environment_variables/`, { key: "CCC_PASSCODE", value: argv.passcode }); }
-  catch { await api("PUT", `/v2/vals/${id}/environment_variables/CCC_PASSCODE`, { value: argv.passcode }); }
-  console.log("passcode set");
+for (const [flag, key] of [["passcode", "CCC_PASSCODE"], ["admin", "CCC_ADMIN_PASSCODE"]] as const) {
+  if (!argv[flag]) continue;
+  try { await api("POST", `/v2/vals/${id}/environment_variables/`, { key, value: argv[flag] }); }
+  catch { await api("PUT", `/v2/vals/${id}/environment_variables/${key}`, { value: argv[flag] }); }
+  console.log(key, "set");
 }
 const v = await api("GET", `/v2/vals/${id}`);
 console.log("val page:", v.links?.html);

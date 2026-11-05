@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS cc2_reviews (
   status TEXT NOT NULL DEFAULT 'open',                 -- open | approved | conditional | blocked
   conditions TEXT NOT NULL DEFAULT '[]',               -- JSON [{text, done}]
   decision_note TEXT, decided_at TEXT,
+  history TEXT NOT NULL DEFAULT '[]',                  -- JSON: earlier decisions kept when a review is reopened
   reopened_reason TEXT, requested_by TEXT REFERENCES cc2_users(id), requested_at TEXT NOT NULL,
   version INTEGER NOT NULL DEFAULT 1
 );
@@ -61,6 +62,10 @@ CREATE TABLE IF NOT EXISTS cc2_agreements (                -- immutable acceptan
   accepted_by TEXT NOT NULL REFERENCES cc2_users(id), accepted_at TEXT NOT NULL, acceptance_evidence TEXT NOT NULL,
   supersedes_id TEXT REFERENCES cc2_agreements(id), created_at TEXT NOT NULL,
   UNIQUE(account_id, proposal_id)
+);
+CREATE TABLE IF NOT EXISTS cc2_measurements (             -- append-only series behind the outcome's latest value
+  id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES cc2_accounts(id),
+  value REAL NOT NULL, basis TEXT, measured_at TEXT NOT NULL, recorded_by TEXT REFERENCES cc2_users(id), created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS cc2_handoffs (
   id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES cc2_accounts(id), agreement_id TEXT NOT NULL REFERENCES cc2_agreements(id),
@@ -104,5 +109,5 @@ CREATE INDEX IF NOT EXISTS tasks_acc ON cc2_tasks(account_id); CREATE INDEX IF N
 
 export async function ensureSchema(d: DB) {
   await d.exec(SCHEMA);
-  for (const sql of ["ALTER TABLE cc2_accounts ADD COLUMN renewal_notice_days INTEGER", "ALTER TABLE cc2_tasks ADD COLUMN customer_side INTEGER NOT NULL DEFAULT 0"]) { try { await d.exec(sql); } catch { /* column exists */ } }
+  for (const sql of ["ALTER TABLE cc2_accounts ADD COLUMN renewal_notice_days INTEGER", "ALTER TABLE cc2_tasks ADD COLUMN customer_side INTEGER NOT NULL DEFAULT 0", "ALTER TABLE cc2_reviews ADD COLUMN history TEXT NOT NULL DEFAULT '[]'"]) { try { await d.exec(sql); } catch { /* column exists */ } }
 }
