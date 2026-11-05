@@ -120,7 +120,7 @@ export function myWork(evals: AccEval[], x: Ctx, owner: string, view: string, qu
 // ---------------------------------------------------------------- Accounts
 export function accountsPage(evals: AccEval[], x: Ctx, f: { owner: string; phase: string; stage: string; attention: string; q: string }): H {
   let rows = evals;
-  if (f.owner) rows = rows.filter((e) => s(e.a.owner_id) === f.owner);
+  if (f.owner && f.owner !== "all") rows = rows.filter((e) => s(e.a.owner_id) === f.owner || s(e.a.technical_owner_id) === f.owner);
   if (f.phase === "presales") rows = rows.filter((e) => isPresales(e.a)); if (f.phase === "post") rows = rows.filter((e) => e.a.sales_stage === "won"); if (f.phase === "closed") rows = rows.filter((e) => e.a.sales_stage === "lost" || e.a.delivery_status === "ended");
   if (f.stage) rows = rows.filter((e) => s(e.a.delivery_status || e.a.sales_stage) === f.stage);
   if (f.attention) rows = rows.filter((e) => e.ev.signals.length > 0);

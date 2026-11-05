@@ -141,7 +141,7 @@ app.get("/accounts", async (c) => {
   const accounts = await loadAccounts(d);
   const evals = [];
   for (const a of accounts) { const rel = await loadRelated(d, s(a.id), x.users); evals.push({ a, rel, ev: evaluateAccount(a, rel, x.today) }); }
-  return page(c, x, "Accounts", V.accountsPage(evals, x, { owner: q(c, "owner"), phase: q(c, "phase"), stage: q(c, "stage"), attention: q(c, "attention"), q: q(c, "q") }));
+  return page(c, x, "Accounts", V.accountsPage(evals, x, { owner: q(c, "owner") || (x.me ? s(x.me.id) : "all"), phase: q(c, "phase"), stage: q(c, "stage"), attention: q(c, "attention"), q: q(c, "q") }));
 });
 app.get("/accounts/new", async (c) => { const x = await ctx(c); return page(c, x, "Add account", V.newAccountForm(x, {})); });
 app.post("/accounts", async (c) => {
