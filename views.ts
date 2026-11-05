@@ -9,24 +9,27 @@ interface Ctx { me: Row | null; users: Row[]; today: string; path: string; msg: 
 export interface AccEval { a: Row; rel: Related; ev: Evaluation }
 
 export const CSS = `
-body{font:15px/1.45 -apple-system,"Helvetica Neue",Arial,sans-serif;color:#111;max-width:1100px;margin:0 auto;padding:0 24px 80px;background:#fff}
-h1,h2,h3{font-family:Georgia,"Times New Roman",serif;font-weight:normal}h1{font-size:26px;margin:20px 0 4px}h2{font-size:19px;margin:28px 0 8px;border-bottom:1px solid #111;padding-bottom:4px}h3{font-size:16px;margin:16px 0 6px}
-nav{display:flex;gap:22px;border-bottom:1px solid #111;padding:12px 0;font-size:14px;align-items:baseline}nav a{color:#111;text-decoration:none}nav a.on{text-decoration:underline}nav .sp{flex:1}
-table{border-collapse:collapse;width:100%;font-size:14px}th{text-align:left;font-weight:normal;color:#555;border-bottom:1px solid #111;padding:6px 8px 4px;font-size:11px;text-transform:uppercase;letter-spacing:.05em}td{border-bottom:1px solid #ddd;padding:7px 8px;vertical-align:top}tr.click:hover{background:#f6f6f6}
-a{color:#111}.muted{color:#666}.small{font-size:13px}.nowrap{white-space:nowrap}
-.red{color:#b00020}.amber{color:#9a6700}.green{color:#1a7f37}.lbl{font-size:11px;text-transform:uppercase;letter-spacing:.05em;border:1px solid #999;padding:0 5px;white-space:nowrap;color:#333}.lbl.red{border-color:#b00020}.lbl.amber{border-color:#9a6700}.lbl.green{border-color:#1a7f37}
-button{font:inherit;font-size:13px;background:#fff;border:1px solid #111;padding:3px 10px;cursor:pointer;border-radius:0}button.primary{background:#0b57d0;border-color:#0b57d0;color:#fff}button.link{border:0;padding:0;text-decoration:underline;color:#444}
-input,select,textarea{font:inherit;font-size:14px;border:1px solid #999;padding:4px 6px;border-radius:0;background:#fff;max-width:100%}textarea{width:100%}input[type=date]{width:150px}
-.field{display:block;margin:8px 0}.field>span{display:block;font-size:12px;color:#555;margin-bottom:2px}.row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}.row .field{flex:1;min-width:140px}.ferr{color:#b00020;font-size:13px}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:28px}@media(max-width:820px){.grid{grid-template-columns:1fr}}
-details summary{cursor:pointer;color:#444;font-size:13px;margin:6px 0}details.drawer{border:1px solid #ddd;padding:0 12px;margin:10px 0}details.drawer[open]{background:#fafafa}details.drawer summary{padding:8px 0}
-.banner{border-left:3px solid #0b57d0;padding:8px 12px;margin:12px 0;background:#f4f7fd}.banner.red{border-color:#b00020;background:#fdf4f4}.banner.amber{border-color:#9a6700;background:#fdf9f0}
-.flash{padding:8px 12px;margin:12px 0;border:1px solid}.flash.err{border-color:#b00020;color:#b00020}.flash.ok{border-color:#1a7f37;color:#1a7f37}
-.tabs{display:flex;gap:18px;border-bottom:1px solid #111;margin:14px 0}.tabs a{padding:6px 0;text-decoration:none;color:#444}.tabs a.on{color:#111;border-bottom:2px solid #111}
-ul.check{list-style:none;padding:0;margin:6px 0}ul.check li{padding:2px 0}ul.check li::before{content:"\\2610  "}ul.check li.ok::before{content:"\\2611  "}ul.check li.ok{color:#777}
-.lede{font-size:17px;margin:14px 0 4px}.lede b{font:22px Georgia,serif}.hint{font-size:13px;color:#666;margin:0 0 8px}.sub{font-size:13px;color:#666}a.btn{display:inline-block;font-size:13px;border:1px solid #111;padding:3px 10px;text-decoration:none;color:#111;white-space:nowrap}
-.hd{display:flex;gap:16px;align-items:baseline;flex-wrap:wrap}.kv dt{color:#555;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-top:8px}.kv dd{margin:0}
-blockquote{margin:4px 0;padding-left:10px;border-left:2px solid #999;color:#333}pre.wrap{white-space:pre-wrap;font:inherit;margin:0}
+*{box-sizing:border-box}
+body{font:15px/1.5 -apple-system,"Segoe UI","Helvetica Neue",Arial,sans-serif;color:#1a1a1a;max-width:900px;margin:0 auto;padding:0 24px 96px;background:#fff}
+h1,h2,h3{font-weight:600;letter-spacing:-.01em;font-family:inherit}h1{font-size:24px;margin:28px 0 8px}h2{font-size:17px;margin:40px 0 12px;padding-bottom:8px;border-bottom:1px solid #e3e3e3}h3{font-size:15px;margin:20px 0 8px}
+nav{display:flex;gap:24px;border-bottom:1px solid #e3e3e3;padding:14px 0;font-size:14px;align-items:center}nav a{color:#1a1a1a;text-decoration:none}nav a.on{font-weight:600}nav .sp{flex:1}
+table{border-collapse:collapse;width:100%;font-size:14px}th{text-align:left;font-weight:500;color:#777;border-bottom:1px solid #e3e3e3;padding:0 10px 8px;font-size:12px}td{border-bottom:1px solid #eee;padding:12px 10px;vertical-align:top;line-height:1.45}tr:last-child td{border-bottom:0}
+a{color:#1a1a1a}.muted{color:#777}.small{font-size:13px}.nowrap{white-space:nowrap}
+.red{color:#b3261e}.amber{color:#9a6700}.green{color:#1b7f3b}.lbl{font-size:11px;text-transform:uppercase;letter-spacing:.05em;border:1px solid #bbb;padding:0 5px;white-space:nowrap;color:#444;border-radius:3px}.lbl.red{border-color:#b3261e}.lbl.amber{border-color:#9a6700}.lbl.green{border-color:#1b7f3b}
+button,a.btn,details.drawer>summary{font:inherit;font-size:13px;font-weight:500;background:#fff;border:1px solid #c9c9c9;padding:6px 12px;cursor:pointer;border-radius:6px;color:#1a1a1a;text-decoration:none;display:inline-block;line-height:1.2;white-space:nowrap}
+button:hover,a.btn:hover,details.drawer>summary:hover{border-color:#1a1a1a}button.primary{background:#1a1a1a;border-color:#1a1a1a;color:#fff}button.link{border:0;padding:0;text-decoration:underline;color:#555;background:none;font-weight:normal}button[disabled]{opacity:.45;cursor:default}
+input,select,textarea{font:inherit;font-size:14px;border:1px solid #c9c9c9;padding:6px 8px;border-radius:6px;background:#fff;max-width:100%}textarea{width:100%}input[type=date]{width:150px}input:focus,select:focus,textarea:focus{outline:2px solid #1a1a1a;outline-offset:-1px}
+.field{display:block;margin:10px 0}.field>span{display:block;font-size:12px;color:#666;margin-bottom:4px}.row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}.row .field{flex:1;min-width:150px}.ferr{color:#b3261e;font-size:13px;margin-top:4px}
+.grid{display:block}
+details.drawer{margin:12px 0}details.drawer>summary{list-style:none}details.drawer>summary::-webkit-details-marker{display:none}details.drawer[open]>summary{border-radius:6px 6px 0 0;border-bottom-color:transparent;background:#f6f6f6}details.drawer[open]>:not(summary){border:1px solid #c9c9c9;border-radius:0 6px 6px 6px;padding:4px 14px 14px;background:#f9f9f9}
+details summary{cursor:pointer;color:#555;font-size:13px}
+.banner{border-left:3px solid #1a1a1a;padding:10px 14px;margin:16px 0;background:#f6f6f6;font-size:15px}.banner.red{border-color:#b3261e;background:#fbf1f0}.banner.amber{border-color:#9a6700;background:#fcf7ea}
+.flash{padding:10px 14px;margin:14px 0;border-radius:6px;font-size:14px}.flash.err{background:#fbf1f0;color:#b3261e}.flash.ok{background:#eef7f0;color:#1b7f3b}
+.tabs{display:flex;gap:4px;border-bottom:1px solid #e3e3e3;margin:20px 0 8px}.tabs a{padding:8px 12px;text-decoration:none;color:#666;border-bottom:2px solid transparent;margin-bottom:-1px}.tabs a.on{color:#1a1a1a;border-bottom-color:#1a1a1a;font-weight:600}
+ul.check{list-style:none;padding:0;margin:6px 0}ul.check li{padding:3px 0}ul.check li::before{content:"\\2610  "}ul.check li.ok::before{content:"\\2611  "}ul.check li.ok{color:#888}
+.lede{font-size:17px;margin:16px 0 4px}.lede b{font-size:22px;font-weight:600}.sub{font-size:13px;color:#777;margin-top:2px}
+.hd{display:flex;gap:14px;align-items:center;flex-wrap:wrap}.kv dt{color:#777;font-size:12px;margin-top:10px}.kv dd{margin:0}
+blockquote{margin:6px 0;padding-left:12px;border-left:2px solid #ccc;color:#333}pre.wrap{white-space:pre-wrap;font:inherit;margin:0}
 `;
 const sev = (x: Signal["severity"]) => x === "warning" ? "amber" : "red";
 const sevWord = (x: Signal["severity"]) => html`<span class="${sev(x)}">${SEVERITY_LABEL[x]}</span>`;
@@ -125,23 +128,19 @@ export function myWork(evals: AccEval[], x: Ctx, owner: string, view: string, qu
   return html`<form method="get" class="hd" style="margin-top:16px"><h1 style="margin:0">My work</h1>
     <select name="owner" onchange="this.form.submit()"><option value="all" ${owner === "all" ? "selected" : ""}>All team</option>${x.users.map((u) => html`<option value="${u.id}" ${owner === s(u.id) ? "selected" : ""}>${u.name}</option>`)}</select>
     <input name="q" value="${query}" placeholder="Find an account" size="18"><button>Search</button></form>
-  <p class="lede">${committed.length ? html`<b class="${overdueN ? "red" : ""}">${overdueN} of ${committed.length}</b> promises to customers are overdue for ${who}.` : html`No open promises to customers for ${who}.`} <a href="/how-alerts-work" class="small">How alerts work</a></p>
+  <p class="lede">${committed.length ? html`<b class="${overdueN ? "red" : ""}">${overdueN} of ${committed.length}</b> promises to customers are overdue for ${who}.` : html`No open promises to customers for ${who}.`}</p>
 
   <h2>Needs attention</h2>
-  <p class="hint">One row per account, biggest problem first. The button is the next step.</p>
   ${attentionRows.length ? html`<table><tr><th>Account</th><th>What is wrong</th><th>Owner</th><th></th></tr>
   ${attentionRows.map((e) => { const at = attention(e.ev)!; return html`<tr><td>${link(e.a)}<div class="sub">${stageOf(e.a)}</div></td><td>${sevWord(at.top.severity)} · ${at.top.reason}${at.others ? html`<div class="sub"><a href="/accounts/${e.a.id}">${at.others} more ${at.others === 1 ? "issue" : "issues"}</a></div>` : ""}</td><td>${nameOf(x, at.top.ownerId)}</td><td class="nowrap"><a class="btn" href="${actionHref(at.top, e.a)}">${TODO[at.top.actionType] ?? "Open"}</a></td></tr>`; })}</table>` : html`<p class="muted">Nothing needs attention.</p>`}
 
   <h2>${owner === "all" ? "Open actions" : "My actions"}</h2>
-  <p class="hint">Dated work, soonest first. "Promised" means the customer was told a date.</p>
   ${myTasks.length ? html`<table><tr><th>Due</th><th>Task</th><th></th></tr>
   ${myTasks.map(({ e, t }) => html`<tr><td class="nowrap">${fmt(t.due_date)}${t.due_date ? html` <span class="small">${dueWord(s(t.due_date), x.today)}</span>` : ""}</td><td>${t.title}${t.committed ? html` <span class="muted">· promised</span>` : ""}<div class="sub">${link(e.a)}${owner === "all" ? html` · ${t.owner_name ?? "unowned"}` : ""}</div></td><td class="nowrap">${taskBtn(e, t)}</td></tr>`)}</table>` : html`<p class="muted">Nothing assigned.</p>`}
 
   <h2>Pipeline</h2>
-  <p class="hint">Deals before signature: Discovery, Proposal, Negotiation.</p>
   ${listTable(pipeline, "No deals in progress.")}
   <h2>Customers</h2>
-  <p class="hint">Signed accounts: onboarding, delivery, active.</p>
   ${listTable(customers, "No signed customers.")}`;
 }
 
@@ -192,7 +191,7 @@ export function accountDetail(a: Row, rel: Related, ev: Evaluation, x: Ctx, tab:
       <form method="post" action="/accounts/${id}/stage" class="row"><input type="hidden" name="version" value="${v}"><input type="hidden" name="to" value="lost"><label class="field"><span>Mark lost — reason</span><select name="reason">${opt(LOST_REASONS)}</select></label><button>Mark lost</button></form></div>` : ""}</details>`;
   const tabs = ["overview", "scope", "delivery"], tabLabel: Record<string, string> = { overview: "Overview", scope: "Scope & approvals", delivery: "Delivery & success" };
   return html`<div class="hd"><h1>${a.name}</h1><span class="small">owner <b>${a.owner_name}</b> · technical owner <b>${a.technical_owner_name ?? html`<span class="amber">unassigned</span>`}</b></span><span class="sp" style="flex:1"></span>
-    <a href="/accounts/${id}?tab=overview#log" class="small"><b>Log meeting</b></a> <a href="/accounts/${id}?tab=overview#add-action" class="small">Add action</a>${a.current_agreement_id ? html` <a href="/accounts/${id}/handoff" class="small">Handoff</a>` : ""}</div>
+    ${a.current_agreement_id ? html`<a href="/accounts/${id}/handoff" class="btn">Handoff</a>` : ""}</div>
   ${stageForm}
   <div class="banner ${bannerCls}">${ev.nextStep}${top && !ev.nextStep.startsWith(top.reason) ? html` <span class="small muted">· ${top.reason}</span>` : ""}</div>
   <div class="tabs">${tabs.map((tb) => html`<a href="/accounts/${id}?tab=${tb}" class="${tab === tb ? "on" : ""}">${tabLabel[tb]}</a>`)}</div>
@@ -213,24 +212,24 @@ function overviewTab(a: Row, rel: Related, ev: Evaluation, x: Ctx, acts: Row[]):
     <label class="field"><span>Budget (blank = unknown)</span><input name="budget" value="${a.budget ?? ""}"></label><button class="primary">Save</button> <a href="/accounts/${id}" class="small">Cancel</a></form></details>
   <details class="drawer" id="owners"><summary>Owners</summary><form method="post" action="/accounts/${id}/edit/owners" class="row"><input type="hidden" name="version" value="${v}"><label class="field"><span>Account owner</span><select name="owner_id">${userOpt(x.users, a.owner_id)}</select></label><label class="field"><span>Technical owner</span><select name="technical_owner_id">${userOpt(x.users, a.technical_owner_id, "unassigned")}</select></label><button class="primary">Save</button></form></details>
 
-  <h2>Relationship health <span class="small muted">— set by a person</span></h2>
+  <h2>Relationship health</h2>
   <p>${{ unknown: html`<span class="muted">Unknown</span>`, healthy: html`<span class="green">Healthy</span>`, watch: html`<span class="amber">Watch</span>`, at_risk: html`<span class="red">At risk</span>` }[s(a.health)] ?? "Unknown"}${a.health_reason ? html` — ${a.health_reason}` : ""}${a.health_reviewed_at ? html` <span class="small muted">(reviewed ${fmt(a.health_reviewed_at)} )</span>` : ""}</p>
-  ${ev.signals.length ? html`<p class="small muted">Automatic warnings below stay visible regardless of this assessment.</p>` : ""}
+  ${ev.signals.length ? html`` : ""}
   <details class="drawer"><summary>Assess health</summary><form method="post" action="/accounts/${id}/edit/health" class="row"><input type="hidden" name="version" value="${v}"><label class="field"><span>Health</span><select name="health">${opt(["unknown", "healthy", "watch", "at_risk"], s(a.health), { unknown: "Unknown", healthy: "Healthy", watch: "Watch", at_risk: "At risk" })}</select></label><label class="field" style="flex:3"><span>Reason</span><input name="health_reason" value="${a.health_reason ?? ""}"></label><button class="primary">Save</button></form></details>
 
-  <h2>Current risks <span class="small muted">— computed from the records</span></h2>
+  <h2>Current risks</h2>
   ${ev.signals.length ? html`<table>${ev.signals.map((g) => html`<tr><td class="nowrap">${sevWord(g.severity)}</td><td>${g.reason}${g.detail ? html`<div class="small muted">${g.detail}</div>` : ""}</td><td class="small">${nameOf(x, g.ownerId)}</td><td class="small">${actionFor(g, a)}</td></tr>`)}</table>` : html`<p class="muted">No automatic issues.</p>`}
   </div><div>
-  <h2 id="log">Log meeting</h2>
+  <h2 id="log">Meetings</h2><details class="drawer"><summary>Log meeting</summary>
   <form method="post" action="/accounts/${id}/meetings"><div class="row"><label class="field"><span>Date</span><input type="date" name="date" value="${t}"></label><label class="field" style="flex:3"><span>Summary</span><input name="summary" required style="width:100%" placeholder="who, what was said, numbers"></label></div>
     <div class="row small"><label class="field" style="flex:2"><span>Next action (optional)</span><input name="action_title" style="width:100%"></label><label class="field"><span>Owner</span><select name="action_owner">${userOpt(x.users, a.owner_id)}</select></label><label class="field"><span>Due</span><input type="date" name="action_due"></label><label class="field"><span>&nbsp;</span><label><input type="checkbox" name="action_customer_side" value="1"> waiting on customer</label></label></div>
     <button class="primary">Save meeting${""} and action</button></form>
+  </details>
   <h2 id="add-action">Next actions</h2>
   ${openTasks.length ? html`<table>${openTasks.map((k) => html`<tr><td class="nowrap">${fmt(k.due_date)}<div class="small">${k.due_date ? dueWord(s(k.due_date), t) : html`<span class="muted">no date</span>`}</div></td><td>${k.title}${k.committed ? html` <span class="muted">· promised</span>` : ""}<div class="small muted">${k.owner_name ?? "unowned"}</div>
     ${["action", "milestone", "measurement"].includes(s(k.type)) ? html`<details><summary>edit</summary><form method="post" action="/tasks/${k.id}/edit" class="row small"><input type="hidden" name="version" value="${k.version}"><label class="field" style="flex:2"><span>Title</span><input name="title" value="${k.title}"></label><label class="field"><span>Owner</span><select name="owner_id">${userOpt(x.users, k.owner_id)}</select></label><label class="field"><span>Due</span><input type="date" name="due_date" value="${k.due_date ?? ""}"></label><label class="field"><span>&nbsp;</span><label><input type="checkbox" name="committed" value="1" ${k.committed ? "checked" : ""}> customer commitment</label>${k.type === "milestone" ? html` <label><input type="checkbox" name="required" value="1" ${k.required ? "checked" : ""}> required</label>` : ""}</label><button>Save</button></form></details>` : ""}</td>
     <td>${k.type === "review" ? html`<a href="/reviews/${k.subject_id}">Decide</a>` : k.type === "handoff" ? html`<a href="/accounts/${id}/handoff">Accept</a>` : html`<form method="post" action="/tasks/${k.id}/done"><input type="hidden" name="version" value="${k.version}"><input type="hidden" name="return" value="/accounts/${id}"><button>Done</button></form>`}</td></tr>`)}</table>` : html`<p class="amber small">No open actions. Every open account should have a dated next step.</p>`}
-  <form method="post" action="/accounts/${id}/tasks" class="row small"><input type="hidden" name="type" value="action"><label class="field" style="flex:3"><span>Add action</span><input name="title" required style="width:100%"></label><label class="field"><span>Owner</span><select name="owner_id">${userOpt(x.users, a.owner_id)}</select></label><label class="field"><span>Due</span><input type="date" name="due_date"></label><label class="field"><span>&nbsp;</span><label><input type="checkbox" name="committed" value="1"> our commitment</label> <label><input type="checkbox" name="customer_side" value="1"> waiting on customer</label></label><button>Add</button></form>
-  <p class="small muted">A customer commitment requires a due date and counts toward the overdue metric.</p>
+  <details class="drawer"><summary>Add action</summary><form method="post" action="/accounts/${id}/tasks" class="row small"><input type="hidden" name="type" value="action"><label class="field" style="flex:3"><span>Add action</span><input name="title" required style="width:100%"></label><label class="field"><span>Owner</span><select name="owner_id">${userOpt(x.users, a.owner_id)}</select></label><label class="field"><span>Due</span><input type="date" name="due_date"></label><label class="field"><span>&nbsp;</span><label><input type="checkbox" name="committed" value="1"> our commitment</label> <label><input type="checkbox" name="customer_side" value="1"> waiting on customer</label></label><button>Add</button></form></details>
   ${rel.tasks.some((k) => k.status !== "open") ? html`<details><summary>${rel.tasks.filter((k) => k.status !== "open").length} completed</summary><ul class="small muted">${rel.tasks.filter((k) => k.status !== "open").map((k) => html`<li>${fmt(k.done_at)} ${k.title}</li>`)}</ul></details>` : ""}
 
   <h2>Activity</h2>
