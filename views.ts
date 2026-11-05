@@ -127,7 +127,7 @@ export function accountsPage(evals: AccEval[], x: Ctx, f: { owner: string; phase
   if (f.q) rows = rows.filter((e) => s(e.a.name).toLowerCase().includes(f.q.toLowerCase()));
   const any = Object.values(f).some(Boolean);
   return html`<h1>Accounts</h1>
-  <form method="get" class="row small"><label class="field"><span>Search</span><input name="q" value="${f.q}"></label><label class="field"><span>Owner</span><select name="owner">${userOpt(x.users, f.owner, "Anyone")}</select></label>
+  <form method="get" class="row small"><label class="field"><span>Search</span><input name="q" value="${f.q}"></label><label class="field"><span>Owner</span><select name="owner"><option value="all" ${f.owner === "all" ? "selected" : ""}>All team</option>${userOpt(x.users, f.owner, "Anyone")}</select></label>
     <label class="field"><span>Phase</span><select name="phase">${opt(["", "presales", "post", "closed"], f.phase, { "": "All", presales: "Presales", post: "Post-sales", closed: "Lost / ended" })}</select></label>
     <label class="field"><span>Stage</span><select name="stage"><option value="">Any</option>${opt(["discovery", "proposal", "negotiation", "onboarding_pending", "delivery", "active", "lost", "ended"], f.stage, STAGE_LABEL)}</select></label>
     <label class="field"><span>&nbsp;</span><label><input type="checkbox" name="attention" value="1" ${f.attention ? "checked" : ""}> needs attention</label></label><button>Filter</button>${any ? html` <a href="/accounts" class="small">Clear filters</a>` : ""}</form>
