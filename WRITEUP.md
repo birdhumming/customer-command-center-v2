@@ -24,9 +24,13 @@ Operating principle, unchanged from the spec: the application automates bookkeep
 | Renewal | ≤30 days (or past) and latest comparable result missing or below target → High | Success review, renewal proposal | The app will not infer success from task completion |
 | Success | NULL means unknown; a different evaluation basis is "not comparable", never improvement | Entering baseline, latest, basis | Measurement is the only evidence; changing the ruler is not progress |
 | Relationship health | Never computed | Unknown / Healthy / Watch / At risk with reason and date | Automatic warnings stay visible next to it; Healthy cannot hide them |
-| Concurrency | Versioned edits; stale save rejected with a recoverable message | Reloading and re-saving | Shared data, no locks |
+| Concurrency | Versioned edits; a missing or stale version is rejected and the typed values are restored into the form with a fresh version | Re-saving after reading the conflict | Shared data, no locks |
+| Waiting on the customer | An action marked customer-side suppresses "stalled" until its date, then becomes "Customer late"; it never counts as our commitment | Deciding what to chase | Counsel out of office is not a stalled deal, and not our promise either |
+| Existing customers | Backfill creates rev 1 + an agreement snapshot labelled backfilled, no handoff | Typing the contract of record and naming the technical owner | The CSM book must be enterable without faking a sale; the label keeps the audit honest |
+| Approvals across revisions | Price/dates-only revisions carry approvals forward; scope, success-criterion and data-handling changes reopen them with the diff | Reviewer re-decides | Engineers approve scope and handling, not price |
+| Ownership | Blank owner stays blank and is flagged | Assigning | Inventing an owner hides the gap |
 
-Nothing sends external messages. Nothing is hidden by snoozing (not built).
+Nothing sends external messages. Nothing is hidden by snoozing (not built). Identity: every write is attributed to the teammate chosen top-right; with no identity the server refuses (403). Only the assigned, non-sales reviewer decides technical and data reviews; only the technical owner accepts a handoff; Lost/Ended accounts are read-only except reopening with a reason.
 
 ## 3. Rules (all in `rules.ts`, pure, re-evaluated on every read)
 
@@ -36,22 +40,22 @@ Transitions and gates:
 
 | From → To | Required |
 |---|---|
-| Discovery → Proposal | problem; contact; buyer named or explicitly unknown; proposal revision with deliverables and price; success metric + target; technical validation approved for this revision, or waived with reason when no unresolved restriction exists |
+| Discovery → Proposal | problem; contact; buyer named or explicitly unknown; proposal revision with deliverables and price; success metric + target; technical validation approved for this revision, or waived with reason when no unresolved restriction exists; no blocked review |
 | Proposal → Negotiation | revision marked shared with date; buyer named; dated commercial action with owner |
-| Negotiation → Won | only via Confirm agreement: evidence + date; technical owner; every required review satisfied for the current revisions; no explicit data conflict |
+| Negotiation → Won | only via Confirm agreement: evidence + date (not future); technical owner (non-sales); revision shared with the customer; every required review satisfied for the current revisions; restrictions recorded (unknown is not permission); no explicit data conflict |
 | Onboarding pending → Delivery | handoff accepted (not reopened); required data review still valid; first milestone with owner and date |
 | Delivery → Active | required milestones done; outcome measured, or "not yet measured" reason plus a dated measurement task |
 | Active → Ended | reason and date (End engagement) |
 
 Skipping forward is rejected. Backward presales moves need a reason. Lost needs a reason and is presales-only. Unknown budget and missing baseline are warnings, not blockers.
 
-Signals, strongest first: critical (data conflict with proposal → "Proposed change requires review"; with the accepted agreement → "Current agreement needs review"), high (reopened review, stale approval, blocked review, overdue commitment, handoff pending, delivery intervention, renewal intervention, unassigned reviewer), warning (pending review, clarification, stalled prospect, missing next step, open blocker, budget unknown, baseline missing, renewal step missing). Needs attention shows one row per account: strongest reason, count of others, responsible person, one action.
+Signals, strongest first: critical (data conflict with proposal → "Proposed change requires review"; with the accepted agreement → "Current agreement needs review"), high (reopened review, stale approval, blocked review, overdue commitment, customer late, handoff pending, delivery intervention, renewal intervention against the notice deadline, unassigned reviewer), warning (pending review, clarification, waiting on customer, stalled prospect, check-in overdue 30d, missing next step, unowned action, open blocker, below target, expansion unowned, budget unknown, baseline missing, renewal step missing). Needs attention shows one row per account: strongest reason, count of others, responsible person, one action.
 
 Automation tasks are unique per (account, rule, subject); re-requests reopen the same row. Review tasks close only through a decision; handoff tasks only through acceptance.
 
 ## 4. Data model
 
-12 tables, UUID keys, versions on mutable rows: users, accounts, proposals (immutable revisions incl. handling JSON), requirements (immutable revisions), reviews (bound to revision ids, conditions JSON), agreements (snapshot: proposal + requirements + evidence + who/when, supersedes), handoffs (one per agreement, acceptance fields, stale_reason), tasks (action | milestone | measurement | review | handoff; committed, required, automation_key, subject_id), meetings (date, summary, author), blockers, outcomes (one per account; baseline/latest with bases; not_measured_reason), activity (append-only).
+13 tables, UUID keys, versions on mutable rows: users, accounts, proposals (immutable revisions incl. handling JSON), requirements (immutable revisions), reviews (bound to revision ids, conditions JSON, history JSON of earlier decisions), measurements (append-only series), agreements (snapshot: proposal + requirements + evidence + who/when, supersedes), handoffs (one per agreement, acceptance fields, stale_reason), tasks (action | milestone | measurement | review | handoff; committed, required, automation_key, subject_id), meetings (date, summary, author), blockers, outcomes (one per account; baseline/latest with bases; not_measured_reason), activity (append-only).
 
 ## 5. Seed
 
@@ -71,7 +75,9 @@ Five accounts, three teammates, dates relative to seed day so the conditions hol
 2. Identity is a shared passcode plus a teammate selector. Ownership rules (only the technical owner accepts a handoff, only the reviewer checks conditions) are enforced against the selected identity; this is attribution, not authentication.
 3. Dates are date-only, interpreted in America/Los_Angeles. "Today" on the server uses that zone.
 4. Acceptance evidence is a typed note or link; the app labels it "as recorded, not verified".
-5. Renewal uses one date; notice periods are the owner's job to encode as the renewal date (see adverse-review findings).
+5. Renewal has a date and an optional notice period; all renewal alerts run against the decision deadline (date minus notice).
+6. Rejected saves preserve typed input through a 20-line inline script (sessionStorage) rather than server-side re-rendering of every form; the server still validates everything and supplies the fresh version.
+7. Data review is required for every proposal unless the customer's restrictions are recorded as "none stated" with an evidence note. Price/dates-only revisions carry approvals forward.
 
 ## 7. Adverse review
 
@@ -119,7 +125,16 @@ Not fixed, by choice: meeting attendees (so "buyer never in a meeting" is still 
 
 Confirmed working on the fixed build by the reviewer: "waiting on customer" (Halden), two-tab stale save rejected with the conflicting value kept, relative alert dates current on refresh, Healthy not hiding warnings, v4 measurement shown as not comparable.
 
-## 8. Three bullets on design and tradeoffs
+## 8. Known limitations
+
+- Meetings have no attendee list, so "buyer named but never in a meeting" is a note, not a signal.
+- Unresolved commercial terms (e.g. uncapped indemnity) and contested baselines live in prose (`price_terms`, `success_basis`); there is no structured "open issues" list.
+- Amendments that widen scope at the same price are not flagged; the agreement-review, delivery-plan and success-review kinds are requestable but no gate consumes them.
+- One outcome metric per engagement; the series is kept but only the latest value is operative.
+- Identity is a selector, not authentication; the passcode is shared. Val Town SQLite instead of hosted PostgreSQL.
+- Thresholds (14d stalled, 30d check-in, 30d renewal window, 3-day review due) are demo assumptions.
+
+## 9. Three bullets on design and tradeoffs
 
 1. **Revisions, snapshots and bound reviews instead of editable fields.** Proposals and customer restrictions are immutable revisions; the accepted agreement is a snapshot; every review records which revisions it approved. A material edit therefore cannot silently keep an approval, and "what did we agree" has exactly one answer. Cost: more rows and a small diff view; benefit: the Lattice "weekly reports dropped at 23:40" problem becomes a visible proposed change rather than a memory.
 2. **One pure evaluator, read-time signals, write-time tasks.** `evaluateAccount` computes readiness and signals on every page load, so time-based alerts are never stale and no "health score" is stored; the only writes automation performs are deduplicated tasks keyed by (account, rule, subject). Cost: every list page evaluates every account (fine at this scale); benefit: rules are testable in one file and explainable on one page.
