@@ -24,11 +24,12 @@ details summary{cursor:pointer;color:#444;font-size:13px;margin:6px 0}details.dr
 .flash{padding:8px 12px;margin:12px 0;border:1px solid}.flash.err{border-color:#b00020;color:#b00020}.flash.ok{border-color:#1a7f37;color:#1a7f37}
 .tabs{display:flex;gap:18px;border-bottom:1px solid #111;margin:14px 0}.tabs a{padding:6px 0;text-decoration:none;color:#444}.tabs a.on{color:#111;border-bottom:2px solid #111}
 ul.check{list-style:none;padding:0;margin:6px 0}ul.check li{padding:2px 0}ul.check li::before{content:"\\2610  "}ul.check li.ok::before{content:"\\2611  "}ul.check li.ok{color:#777}
-.metric{display:inline-block;border:1px solid #111;padding:6px 12px;margin:10px 0}.metric b{font:22px Georgia,serif}
+.lede{font-size:17px;margin:14px 0 4px}.lede b{font:22px Georgia,serif}.hint{font-size:13px;color:#666;margin:0 0 8px}.sub{font-size:13px;color:#666}a.btn{display:inline-block;font-size:13px;border:1px solid #111;padding:3px 10px;text-decoration:none;color:#111;white-space:nowrap}
 .hd{display:flex;gap:16px;align-items:baseline;flex-wrap:wrap}.kv dt{color:#555;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-top:8px}.kv dd{margin:0}
 blockquote{margin:4px 0;padding-left:10px;border-left:2px solid #999;color:#333}pre.wrap{white-space:pre-wrap;font:inherit;margin:0}
 `;
 const sev = (x: Signal["severity"]) => x === "warning" ? "amber" : "red";
+const sevWord = (x: Signal["severity"]) => html`<span class="${sev(x)}">${SEVERITY_LABEL[x]}</span>`;
 const sevLabel = (x: Signal["severity"]) => html`<span class="lbl ${sev(x)}">${SEVERITY_LABEL[x]}</span>`;
 // timestamps render as Pacific dates; date-only strings pass through
 const fmt = (d: unknown) => { const v = s(d); if (!v) return "—"; return v.length > 10 && v.includes("T") ? new Date(v).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" }) : v.slice(0, 10); };
@@ -47,7 +48,7 @@ export function layout(title: string, body: H, x: Ctx): H {
   const nav = (href: string, label: string) => html`<a href="${href}" class="${x.path === href || (href !== "/" && x.path.startsWith(href)) ? "on" : ""}">${label}</a>`;
   return html`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${title} · Command Center</title><meta name="viewport" content="width=device-width,initial-scale=1"><style>${raw(CSS)}</style></head><body>
 <nav>${nav("/", "My work")}${nav("/accounts", "Accounts")}<span class="sp"></span>
-<form method="post" action="/me" class="small"><input type="hidden" name="next" value="${x.path}">you are <select name="me" onchange="this.form.submit()">${x.users.map((u) => html`<option value="${u.id}" ${x.me && x.me.id === u.id ? "selected" : ""}>${u.name}</option>`)}</select> <span class="muted">(demo identity)</span></form>
+<form method="post" action="/me" class="small"><input type="hidden" name="next" value="${x.path}">acting as <select name="me" onchange="this.form.submit()"><option value="">— pick a role —</option>${x.users.map((u) => html`<option value="${u.id}" ${x.me && x.me.id === u.id ? "selected" : ""}>${u.name}</option>`)}</select></form>
 <a href="/accounts/new" class="small">Add account</a></nav>
 ${x.msg.err ? html`<div class="flash err">${x.msg.err}</div>` : ""}${x.msg.saved ? html`<div class="flash ok">Saved.</div>` : ""}
 ${body}
@@ -57,65 +58,91 @@ export const notFound = (): H => html`<h1>Not found</h1><p><a href="/">Back to M
 export function loginPage(err?: string, next = "/"): H {
   return html`<!doctype html><html><head><meta charset="utf-8"><title>Command Center</title><style>${raw(CSS)}</style></head><body style="max-width:420px;padding-top:80px"><h1>Customer Command Center</h1>
   <form method="post" action="/login"><input type="hidden" name="next" value="${next}"><label class="field"><span>Team passcode</span><input name="passcode" type="password" autofocus></label>${err ? html`<p class="ferr">${err}</p>` : ""}<button class="primary">Enter</button></form>
-  <p class="small muted">Shared passcode plus a teammate selector. The selector is a demo identity for assignment, not individual authentication.</p></body></html>`;
+  <p class="small muted">One shared workspace for a three-role team: Sales, Engineering, Delivery. After entering, pick the role you are acting as; changes are visible to everyone.</p></body></html>`;
 }
 
 // Action button for a signal: one specific next step.
+
+function actionHref(sg: Signal, a: Row): string {
+  const id = s(a.id);
+  switch (sg.actionType) {
+    case "decide_review": return `/reviews/${sg.subjectId}`;
+    case "assign_reviewer": case "assign_technical_owner": return `/accounts/${id}?tab=overview#owners`;
+    case "request_review": case "request_delivery_review": case "request_success_review": return `/accounts/${id}?tab=scope#reviews`;
+    case "complete_task": return `/accounts/${id}?tab=${sg.reason.includes("milestone") ? "delivery" : "overview"}#add-action`;
+    case "accept_handoff": return `/accounts/${id}/handoff`;
+    case "log_meeting": return `/accounts/${id}?tab=overview#log`;
+    case "add_action": return `/accounts/${id}?tab=overview#add-action`;
+    case "record_requirements": return `/accounts/${id}?tab=scope#requirements`;
+    case "declare_handling": case "revise_proposal": return `/accounts/${id}?tab=scope#proposal`;
+    case "resolve_blocker": return `/accounts/${id}?tab=delivery#blockers`;
+    case "record_outcome": return `/accounts/${id}?tab=delivery#outcome`;
+    case "record_calibration": return `/accounts/${id}?tab=scope#calibration`;
+    default: return `/accounts/${id}`;
+  }
+}
 function actionFor(sg: Signal, a: Row): H {
   const id = s(a.id);
   switch (sg.actionType) {
-    case "decide_review": return html`<a href="/reviews/${sg.subjectId}">Review</a>`;
-    case "assign_reviewer": case "assign_technical_owner": return html`<a href="/accounts/${id}?tab=overview#owners">Assign technical owner</a>`;
-    case "request_review": return html`<a href="/accounts/${id}?tab=scope#reviews">Request review</a>`;
-    case "complete_task": return html`<a href="/accounts/${id}?tab=${sg.reason.includes("milestone") ? "delivery" : "overview"}#actions">Open commitment</a>`;
-    case "open_account": return html`<a href="/accounts/${id}">Open account</a>`;
-    case "record_calibration": return html`<a href="/accounts/${id}?tab=scope#calibration">Review calibration</a>`;
-    case "accept_handoff": return html`<a href="/accounts/${id}/handoff">Accept handoff</a>`;
-    case "log_meeting": return html`<a href="/accounts/${id}?tab=overview#log">Log meeting</a>`;
-    case "add_action": return html`<a href="/accounts/${id}?tab=overview#add-action">Add action</a>`;
-    case "request_delivery_review": return html`<a href="/accounts/${id}?tab=scope#reviews">Request delivery-plan review</a>`;
-    case "request_success_review": return html`<a href="/accounts/${id}?tab=scope#reviews">Request success review</a>`;
-    case "record_requirements": return html`<a href="/accounts/${id}?tab=scope#requirements">Record data restrictions</a>`;
-    case "declare_handling": return html`<a href="/accounts/${id}?tab=scope#proposal">Declare handling</a>`;
-    case "resolve_blocker": return html`<a href="/accounts/${id}?tab=delivery#blockers">Resolve blocker</a>`;
-    case "record_outcome": return html`<a href="/accounts/${id}?tab=delivery#outcome">Record outcome</a>`;
-    case "revise_proposal": return html`<a href="/accounts/${id}?tab=scope#proposal">Revise proposal</a>`;
-    case "edit_account": return html`<a href="/accounts/${id}?tab=overview#edit">Edit account</a>`;
-    default: return html`<a href="/accounts/${id}">Open</a>`;
+    case "decide_review": return html`<a class="btn" href="/reviews/${sg.subjectId}">Review</a>`;
+    case "assign_reviewer": case "assign_technical_owner": return html`<a class="btn" href="/accounts/${id}?tab=overview#owners">Assign technical owner</a>`;
+    case "request_review": return html`<a class="btn" href="/accounts/${id}?tab=scope#reviews">Request review</a>`;
+    case "complete_task": return html`<a class="btn" href="/accounts/${id}?tab=${sg.reason.includes("milestone") ? "delivery" : "overview"}#actions">Open commitment</a>`;
+    case "open_account": return html`<a class="btn" href="/accounts/${id}">Open account</a>`;
+    case "record_calibration": return html`<a class="btn" href="/accounts/${id}?tab=scope#calibration">Review calibration</a>`;
+    case "accept_handoff": return html`<a class="btn" href="/accounts/${id}/handoff">Accept handoff</a>`;
+    case "log_meeting": return html`<a class="btn" href="/accounts/${id}?tab=overview#log">Log meeting</a>`;
+    case "add_action": return html`<a class="btn" href="/accounts/${id}?tab=overview#add-action">Add action</a>`;
+    case "request_delivery_review": return html`<a class="btn" href="/accounts/${id}?tab=scope#reviews">Request delivery-plan review</a>`;
+    case "request_success_review": return html`<a class="btn" href="/accounts/${id}?tab=scope#reviews">Request success review</a>`;
+    case "record_requirements": return html`<a class="btn" href="/accounts/${id}?tab=scope#requirements">Record data restrictions</a>`;
+    case "declare_handling": return html`<a class="btn" href="/accounts/${id}?tab=scope#proposal">Declare handling</a>`;
+    case "resolve_blocker": return html`<a class="btn" href="/accounts/${id}?tab=delivery#blockers">Resolve blocker</a>`;
+    case "record_outcome": return html`<a class="btn" href="/accounts/${id}?tab=delivery#outcome">Record outcome</a>`;
+    case "revise_proposal": return html`<a class="btn" href="/accounts/${id}?tab=scope#proposal">Revise proposal</a>`;
+    case "edit_account": return html`<a class="btn" href="/accounts/${id}?tab=overview#edit">Edit account</a>`;
+    default: return html`<a class="btn" href="/accounts/${id}">Open</a>`;
   }
 }
 const nameOf = (x: Ctx, id: unknown) => x.users.find((u) => s(u.id) === s(id))?.name ?? "—";
 
 // ---------------------------------------------------------------- My work
+const TODO: Record<string, string> = { decide_review: "Decide", assign_reviewer: "Assign", assign_technical_owner: "Assign owner", request_review: "Request review", complete_task: "Open", accept_handoff: "Accept handoff", log_meeting: "Log meeting", add_action: "Add action", request_delivery_review: "Review plan", request_success_review: "Review success", record_requirements: "Record restrictions", declare_handling: "Declare handling", revise_proposal: "Revise proposal", edit_account: "Edit", resolve_blocker: "Resolve", record_outcome: "Record result", open_account: "Open", record_calibration: "Open" };
 export function myWork(evals: AccEval[], x: Ctx, owner: string, view: string, query: string): H {
   const mine = (e: AccEval) => owner === "all" || s(e.a.owner_id) === owner || s(e.a.technical_owner_id) === owner;
   const qmatch = (e: AccEval) => !query || s(e.a.name).toLowerCase().includes(query.toLowerCase());
   const visible = evals.filter(mine).filter(qmatch);
   const committed = visible.flatMap((e) => e.rel.tasks.filter((t) => t.status === "open" && t.committed && !t.customer_side && (owner === "all" || s(t.owner_id) === owner || s(e.a.owner_id) === owner)));
   const overdueN = committed.filter((t) => t.due_date && s(t.due_date) < x.today).length;
-  const attentionRows = visible.filter((e) => e.ev.signals.length).sort((p, q) => { const o = { critical: 0, high: 1, warning: 2 }; return o[p.ev.signals[0].severity] - o[q.ev.signals[0].severity] || s(p.a.created_at).localeCompare(s(q.a.created_at)); });
-  const myTasks = evals.flatMap((e) => e.rel.tasks.filter((t) => t.status === "open" && (owner === "all" || s(t.owner_id) === owner)).map((t) => ({ e, t })))
-    .sort((p, q) => (s(p.t.due_date) || "9999").localeCompare(s(q.t.due_date) || "9999"));
-  const pipeline = visible.filter((e) => isPresales(e.a) || e.a.sales_stage === "lost"), customers = visible.filter((e) => e.a.sales_stage === "won");
-  const list = view === "customers" ? customers : pipeline;
-  const url = (p: Record<string, string>) => "/?" + new URLSearchParams({ owner, view, q: query, ...p }).toString();
+  const order = { critical: 0, high: 1, warning: 2 };
+  const attentionRows = visible.filter((e) => e.ev.signals.length).sort((p, q) => order[p.ev.signals[0].severity] - order[q.ev.signals[0].severity] || s(p.a.created_at).localeCompare(s(q.a.created_at)));
+  const myTasks = evals.flatMap((e) => e.rel.tasks.filter((t) => t.status === "open" && (owner === "all" || s(t.owner_id) === owner)).map((t) => ({ e, t }))).sort((p, q) => (s(p.t.due_date) || "9999").localeCompare(s(q.t.due_date) || "9999"));
+  const pipeline = visible.filter((e) => isPresales(e.a)), customers = visible.filter((e) => e.a.sales_stage === "won");
+  const who = owner === "all" ? "the team" : nameOf(x, owner);
+  const taskBtn = (e: AccEval, t: Row) => t.type === "review" ? html`<a class="btn" href="/reviews/${t.subject_id}">Decide</a>` : t.type === "handoff" ? html`<a class="btn" href="/accounts/${e.a.id}/handoff">Accept handoff</a>` : html`<form method="post" action="/tasks/${t.id}/done" style="display:inline"><input type="hidden" name="version" value="${t.version}"><input type="hidden" name="return" value="/"><button>Done</button></form>`;
+  const listTable = (rows: AccEval[], empty: string) => rows.length ? html`<table><tr><th>Account</th><th>Stage</th><th>Next dated action</th><th>Biggest problem</th></tr>
+    ${rows.map((e) => { const nd = nextDated(e.rel), top = e.ev.signals[0]; return html`<tr><td>${link(e.a)}</td><td>${stageOf(e.a)}</td><td>${nd ? html`${fmt(nd.due_date)} — ${nd.title}` : html`<span class="amber">none</span>`}</td><td>${top ? html`${sevWord(top.severity)} · ${top.reason}` : html`<span class="muted">none</span>`}</td></tr>`; })}</table>` : html`<p class="muted">${empty}</p>`;
   return html`<form method="get" class="hd" style="margin-top:16px"><h1 style="margin:0">My work</h1>
-    <label class="small">owner <select name="owner" onchange="this.form.submit()"><option value="all" ${owner === "all" ? "selected" : ""}>All team</option>${x.users.map((u) => html`<option value="${u.id}" ${owner === s(u.id) ? "selected" : ""}>${u.name}</option>`)}</select></label>
-    <input type="hidden" name="view" value="${view}"><input name="q" value="${query}" placeholder="search accounts" size="18"> <button>Search</button> <a href="/accounts/new" class="small">Add account</a></form>
-  <div class="metric"><span class="small muted">Open commitments overdue</span> <a href="${url({ view: "commitments" })}" style="text-decoration:none"><b class="${overdueN ? "red" : ""}">${committed.length ? `${overdueN} / ${committed.length}` : "—"}</b></a> <span class="small muted">committed work due before today / all incomplete committed work · <a href="/how-alerts-work">how alerts work</a></span></div>
+    <select name="owner" onchange="this.form.submit()"><option value="all" ${owner === "all" ? "selected" : ""}>All team</option>${x.users.map((u) => html`<option value="${u.id}" ${owner === s(u.id) ? "selected" : ""}>${u.name}</option>`)}</select>
+    <input name="q" value="${query}" placeholder="Find an account" size="18"><button>Search</button></form>
+  <p class="lede">${committed.length ? html`<b class="${overdueN ? "red" : ""}">${overdueN} of ${committed.length}</b> promises to customers are overdue for ${who}.` : html`No open promises to customers for ${who}.`} <a href="/how-alerts-work" class="small">How alerts work</a></p>
 
   <h2>Needs attention</h2>
-  ${attentionRows.length ? html`<table><tr><th>Account</th><th>Strongest reason</th><th>Others</th><th>Responsible</th><th>Action</th></tr>
-  ${attentionRows.map((e) => { const at = attention(e.ev)!; return html`<tr><td>${link(e.a)}<div class="small muted">${stageOf(e.a)}</div></td><td>${sevLabel(at.top.severity)} ${at.top.reason}${at.top.detail ? html`<div class="small muted">${at.top.detail}</div>` : ""}</td><td class="small">${at.others ? html`+${at.others} <span class="muted">(${e.ev.signals.slice(1, 3).map((g) => g.reason).join("; ")}${at.others > 2 ? "…" : ""})</span>` : "—"}</td><td class="small">${nameOf(x, at.top.ownerId)}</td><td class="small">${actionFor(at.top, e.a)}</td></tr>`; })}</table>` : html`<p class="muted">No automatic issues for this owner.</p>`}
+  <p class="hint">One row per account, biggest problem first. The button is the next step.</p>
+  ${attentionRows.length ? html`<table><tr><th>Account</th><th>What is wrong</th><th>Owner</th><th></th></tr>
+  ${attentionRows.map((e) => { const at = attention(e.ev)!; return html`<tr><td>${link(e.a)}<div class="sub">${stageOf(e.a)}</div></td><td>${sevWord(at.top.severity)} · ${at.top.reason}${at.others ? html`<div class="sub"><a href="/accounts/${e.a.id}">${at.others} more ${at.others === 1 ? "issue" : "issues"}</a></div>` : ""}</td><td>${nameOf(x, at.top.ownerId)}</td><td class="nowrap"><a class="btn" href="${actionHref(at.top, e.a)}">${TODO[at.top.actionType] ?? "Open"}</a></td></tr>`; })}</table>` : html`<p class="muted">Nothing needs attention.</p>`}
 
-  <h2>${owner === "all" ? "All open actions" : "My actions"}</h2>
-  ${myTasks.length ? html`<table><tr><th>Due</th><th>Account</th><th>Task</th><th>Type</th><th></th></tr>
-  ${myTasks.map(({ e, t }) => html`<tr><td class="nowrap">${fmt(t.due_date)} ${t.due_date ? html`<span class="small">${dueWord(s(t.due_date), x.today)}</span>` : html`<span class="small muted">no date</span>`}</td><td>${link(e.a)}${s(e.a.owner_id) !== owner && owner !== "all" ? html`<div class="small muted">owner ${e.a.owner_name}</div>` : ""}</td><td>${t.title}${t.committed ? html` <span class="lbl">committed</span>` : ""}${t.required ? html` <span class="lbl">required</span>` : ""}</td><td class="small muted">${t.type}${owner === "all" ? html` · ${t.owner_name ?? "—"}` : ""}</td>
-    <td>${t.type === "review" ? html`<a href="/reviews/${t.subject_id}">Decide</a>` : t.type === "handoff" ? html`<a href="/accounts/${e.a.id}/handoff">Accept</a>` : html`<form method="post" action="/tasks/${t.id}/done" style="display:inline"><input type="hidden" name="version" value="${t.version}"><input type="hidden" name="return" value="/"><button>Done</button></form>`}</td></tr>`)}</table>` : html`<p class="muted">Nothing assigned.</p>`}
+  <h2>${owner === "all" ? "Open actions" : "My actions"}</h2>
+  <p class="hint">Dated work, soonest first. "Promised" means the customer was told a date.</p>
+  ${myTasks.length ? html`<table><tr><th>Due</th><th>Task</th><th></th></tr>
+  ${myTasks.map(({ e, t }) => html`<tr><td class="nowrap">${fmt(t.due_date)}${t.due_date ? html` <span class="small">${dueWord(s(t.due_date), x.today)}</span>` : ""}</td><td>${t.title}${t.committed ? html` <span class="muted">· promised</span>` : ""}<div class="sub">${link(e.a)}${owner === "all" ? html` · ${t.owner_name ?? "unowned"}` : ""}</div></td><td class="nowrap">${taskBtn(e, t)}</td></tr>`)}</table>` : html`<p class="muted">Nothing assigned.</p>`}
 
-  <h2><a href="${url({ view: "pipeline" })}" style="text-decoration:${view !== "customers" ? "underline" : "none"}">My pipeline</a> <span class="muted">/</span> <a href="${url({ view: "customers" })}" style="text-decoration:${view === "customers" ? "underline" : "none"}">My customers</a></h2>
-  ${list.length ? html`<table><tr><th>Account</th><th>Stage</th><th>Next action</th><th>Top risk</th></tr>
-  ${list.map((e) => { const nd = nextDated(e.rel); return html`<tr><td>${link(e.a)}<div class="small muted">${e.a.owner_name}${e.a.technical_owner_name ? html` · ${e.a.technical_owner_name}` : ""}</div></td><td>${stageOf(e.a)}</td><td class="small">${nd ? html`${fmt(nd.due_date)} ${nd.title}` : html`<span class="amber">none dated</span>`}</td><td class="small">${e.ev.signals[0] ? html`${sevLabel(e.ev.signals[0].severity)} ${e.ev.signals[0].reason}` : html`<span class="muted">—</span>`}</td></tr>`; })}</table>` : html`<p class="muted">${view === "customers" ? "No won accounts for this owner." : "No presales accounts for this owner."}</p>`}`;
+  <h2>Pipeline</h2>
+  <p class="hint">Deals before signature: Discovery, Proposal, Negotiation.</p>
+  ${listTable(pipeline, "No deals in progress.")}
+  <h2>Customers</h2>
+  <p class="hint">Signed accounts: onboarding, delivery, active.</p>
+  ${listTable(customers, "No signed customers.")}`;
 }
 
 // ---------------------------------------------------------------- Accounts
@@ -133,7 +160,7 @@ export function accountsPage(evals: AccEval[], x: Ctx, f: { owner: string; phase
     <label class="field"><span>Stage</span><select name="stage"><option value="">Any</option>${opt(["discovery", "proposal", "negotiation", "onboarding_pending", "delivery", "active", "lost", "ended"], f.stage, STAGE_LABEL)}</select></label>
     <label class="field"><span>&nbsp;</span><label><input type="checkbox" name="attention" value="1" ${f.attention ? "checked" : ""}> needs attention</label></label><button>Filter</button>${any ? html` <a href="/accounts" class="small">Clear filters</a>` : ""}</form>
   ${rows.length ? html`<table><tr><th>Account</th><th>Owner</th><th>Stage</th><th>Next action</th><th>Attention</th></tr>
-  ${rows.map((e) => { const nd = nextDated(e.rel), top = e.ev.signals[0]; return html`<tr class="click"><td>${link(e.a)}<div class="small muted">${e.a.contact ?? ""}</div></td><td class="small">${e.a.owner_name}${e.a.technical_owner_name ? html`<div class="muted">tech: ${e.a.technical_owner_name}</div>` : ""}</td><td>${stageOf(e.a)}</td><td class="small">${nd ? html`${fmt(nd.due_date)} ${nd.title}` : html`<span class="amber">none dated</span>`}</td><td class="small">${top ? html`${sevLabel(top.severity)} ${top.reason}${e.ev.signals.length > 1 ? html` <span class="muted">+${e.ev.signals.length - 1}</span>` : ""}` : html`<span class="muted">—</span>`}</td></tr>`; })}</table>`
+  ${rows.map((e) => { const nd = nextDated(e.rel), top = e.ev.signals[0]; return html`<tr class="click"><td>${link(e.a)}<div class="small muted">${e.a.contact ?? ""}</div></td><td class="small">${e.a.owner_name}${e.a.technical_owner_name ? html`<div class="muted">tech: ${e.a.technical_owner_name}</div>` : ""}</td><td>${stageOf(e.a)}</td><td class="small">${nd ? html`${fmt(nd.due_date)} ${nd.title}` : html`<span class="amber">none dated</span>`}</td><td class="small">${top ? html`${sevWord(top.severity)} ${top.reason}${e.ev.signals.length > 1 ? html` <span class="muted">+${e.ev.signals.length - 1}</span>` : ""}` : html`<span class="muted">—</span>`}</td></tr>`; })}</table>`
   : html`<p class="muted">${any ? "No accounts match these filters." : "No accounts yet."} ${any ? html`<a href="/accounts">Clear filters</a>` : html`<a href="/accounts/new">Add the first one</a>`}.</p>`}`;
 }
 export function newAccountForm(x: Ctx, d: Record<string, string>, errs: Record<string, string> = {}): H {
@@ -158,7 +185,7 @@ export function accountDetail(a: Row, rel: Related, ev: Evaluation, x: Ctx, tab:
   const open = a.sales_stage !== "lost" && a.delivery_status !== "ended";
   const top = ev.signals[0];
   const bannerCls = top?.severity === "critical" || top?.severity === "high" ? "red" : top ? "amber" : "";
-  const stageForm = html`<details class="drawer" ${panel === "stage" ? "open" : ""}><summary><b>${stageOf(a)}</b> ${ev.readiness.to ? html`→ ${ev.readiness.toLabel}: ${ev.readiness.ready ? html`<span class="green">ready</span>` : html`${ev.readiness.items.filter((i) => !i.ok).length} missing`}` : ""}</summary>
+  const stageForm = html`<details class="drawer" ${panel === "stage" ? "open" : ""}><summary><b>${stageOf(a)}</b> ${ev.readiness.to && ev.readiness.via !== "end" ? html`→ ${ev.readiness.toLabel}: ${ev.readiness.ready ? html`<span class="green">ready</span>` : html`${ev.readiness.items.filter((i) => !i.ok).length} missing`}` : ""}</summary>
     ${ev.readiness.to ? html`<ul class="check">${ev.readiness.items.map((i) => html`<li class="${i.ok ? "ok" : ""}">${i.anchor ? html`<a href="/accounts/${id}?tab=${i.anchor === "approvals" ? "scope" : i.anchor}#${i.anchor}">${i.label}</a>` : i.label}${!i.ok && i.hint ? html` <span class="small muted">— ${i.hint}</span>` : ""}</li>`)}</ul>
       ${ev.readiness.via === "advance" ? html`<form method="post" action="/accounts/${id}/stage"><input type="hidden" name="version" value="${v}"><input type="hidden" name="to" value="${ev.readiness.to}"><button class="primary" ${ev.readiness.ready ? "" : "disabled"}>Advance to ${ev.readiness.toLabel}</button> <span class="small muted">Server re-checks the list; filling the last field never moves the deal by itself.</span></form>` : ev.readiness.via === "confirm_agreement" ? html`<p class="small">Won is recorded by <a href="/accounts/${id}?tab=scope#confirm">Confirm agreement</a>, which needs acceptance evidence.</p>` : html`<p class="small">Ending is recorded on the <a href="/accounts/${id}?tab=delivery#end">Delivery &amp; success</a> tab with a reason.</p>`}` : ""}
     ${isPresales(a) ? html`<div class="row small" style="margin:10px 0"><form method="post" action="/accounts/${id}/stage" class="row"><input type="hidden" name="version" value="${v}"><label class="field"><span>Move backward to</span><select name="to">${opt(["discovery", "proposal", "negotiation"].filter((st) => st !== a.sales_stage && ["discovery", "proposal", "negotiation"].indexOf(st) < ["discovery", "proposal", "negotiation"].indexOf(s(a.sales_stage))), undefined, STAGE_LABEL)}</select></label><label class="field" style="flex:2"><span>Reason</span><input name="reason"></label><button>Move back</button></form>
@@ -186,20 +213,20 @@ function overviewTab(a: Row, rel: Related, ev: Evaluation, x: Ctx, acts: Row[]):
     <label class="field"><span>Budget (blank = unknown)</span><input name="budget" value="${a.budget ?? ""}"></label><button class="primary">Save</button> <a href="/accounts/${id}" class="small">Cancel</a></form></details>
   <details class="drawer" id="owners"><summary>Owners</summary><form method="post" action="/accounts/${id}/edit/owners" class="row"><input type="hidden" name="version" value="${v}"><label class="field"><span>Account owner</span><select name="owner_id">${userOpt(x.users, a.owner_id)}</select></label><label class="field"><span>Technical owner</span><select name="technical_owner_id">${userOpt(x.users, a.technical_owner_id, "unassigned")}</select></label><button class="primary">Save</button></form></details>
 
-  <h2>Relationship health <span class="small muted">(manual)</span></h2>
+  <h2>Relationship health <span class="small muted">— set by a person</span></h2>
   <p>${{ unknown: html`<span class="muted">Unknown</span>`, healthy: html`<span class="green">Healthy</span>`, watch: html`<span class="amber">Watch</span>`, at_risk: html`<span class="red">At risk</span>` }[s(a.health)] ?? "Unknown"}${a.health_reason ? html` — ${a.health_reason}` : ""}${a.health_reviewed_at ? html` <span class="small muted">(reviewed ${fmt(a.health_reviewed_at)} )</span>` : ""}</p>
   ${ev.signals.length ? html`<p class="small muted">Automatic warnings below stay visible regardless of this assessment.</p>` : ""}
   <details class="drawer"><summary>Assess health</summary><form method="post" action="/accounts/${id}/edit/health" class="row"><input type="hidden" name="version" value="${v}"><label class="field"><span>Health</span><select name="health">${opt(["unknown", "healthy", "watch", "at_risk"], s(a.health), { unknown: "Unknown", healthy: "Healthy", watch: "Watch", at_risk: "At risk" })}</select></label><label class="field" style="flex:3"><span>Reason</span><input name="health_reason" value="${a.health_reason ?? ""}"></label><button class="primary">Save</button></form></details>
 
-  <h2>Current risks <span class="small muted">(automatic)</span></h2>
-  ${ev.signals.length ? html`<table>${ev.signals.map((g) => html`<tr><td class="nowrap">${sevLabel(g.severity)}</td><td>${g.reason}${g.detail ? html`<div class="small muted">${g.detail}</div>` : ""}</td><td class="small">${nameOf(x, g.ownerId)}</td><td class="small">${actionFor(g, a)}</td></tr>`)}</table>` : html`<p class="muted">No automatic issues.</p>`}
+  <h2>Current risks <span class="small muted">— computed from the records</span></h2>
+  ${ev.signals.length ? html`<table>${ev.signals.map((g) => html`<tr><td class="nowrap">${sevWord(g.severity)}</td><td>${g.reason}${g.detail ? html`<div class="small muted">${g.detail}</div>` : ""}</td><td class="small">${nameOf(x, g.ownerId)}</td><td class="small">${actionFor(g, a)}</td></tr>`)}</table>` : html`<p class="muted">No automatic issues.</p>`}
   </div><div>
   <h2 id="log">Log meeting</h2>
   <form method="post" action="/accounts/${id}/meetings"><div class="row"><label class="field"><span>Date</span><input type="date" name="date" value="${t}"></label><label class="field" style="flex:3"><span>Summary</span><input name="summary" required style="width:100%" placeholder="who, what was said, numbers"></label></div>
     <div class="row small"><label class="field" style="flex:2"><span>Next action (optional)</span><input name="action_title" style="width:100%"></label><label class="field"><span>Owner</span><select name="action_owner">${userOpt(x.users, a.owner_id)}</select></label><label class="field"><span>Due</span><input type="date" name="action_due"></label><label class="field"><span>&nbsp;</span><label><input type="checkbox" name="action_customer_side" value="1"> waiting on customer</label></label></div>
     <button class="primary">Save meeting${""} and action</button></form>
   <h2 id="add-action">Next actions</h2>
-  ${openTasks.length ? html`<table>${openTasks.map((k) => html`<tr><td class="nowrap">${fmt(k.due_date)}<div class="small">${k.due_date ? dueWord(s(k.due_date), t) : html`<span class="muted">no date</span>`}</div></td><td>${k.title}${k.committed ? html` <span class="lbl">committed</span>` : ""}<div class="small muted">${k.type} · ${k.owner_name ?? "unassigned"}</div>
+  ${openTasks.length ? html`<table>${openTasks.map((k) => html`<tr><td class="nowrap">${fmt(k.due_date)}<div class="small">${k.due_date ? dueWord(s(k.due_date), t) : html`<span class="muted">no date</span>`}</div></td><td>${k.title}${k.committed ? html` <span class="muted">· promised</span>` : ""}<div class="small muted">${k.owner_name ?? "unowned"}</div>
     ${["action", "milestone", "measurement"].includes(s(k.type)) ? html`<details><summary>edit</summary><form method="post" action="/tasks/${k.id}/edit" class="row small"><input type="hidden" name="version" value="${k.version}"><label class="field" style="flex:2"><span>Title</span><input name="title" value="${k.title}"></label><label class="field"><span>Owner</span><select name="owner_id">${userOpt(x.users, k.owner_id)}</select></label><label class="field"><span>Due</span><input type="date" name="due_date" value="${k.due_date ?? ""}"></label><label class="field"><span>&nbsp;</span><label><input type="checkbox" name="committed" value="1" ${k.committed ? "checked" : ""}> customer commitment</label>${k.type === "milestone" ? html` <label><input type="checkbox" name="required" value="1" ${k.required ? "checked" : ""}> required</label>` : ""}</label><button>Save</button></form></details>` : ""}</td>
     <td>${k.type === "review" ? html`<a href="/reviews/${k.subject_id}">Decide</a>` : k.type === "handoff" ? html`<a href="/accounts/${id}/handoff">Accept</a>` : html`<form method="post" action="/tasks/${k.id}/done"><input type="hidden" name="version" value="${k.version}"><input type="hidden" name="return" value="/accounts/${id}"><button>Done</button></form>`}</td></tr>`)}</table>` : html`<p class="amber small">No open actions. Every open account should have a dated next step.</p>`}
   <form method="post" action="/accounts/${id}/tasks" class="row small"><input type="hidden" name="type" value="action"><label class="field" style="flex:3"><span>Add action</span><input name="title" required style="width:100%"></label><label class="field"><span>Owner</span><select name="owner_id">${userOpt(x.users, a.owner_id)}</select></label><label class="field"><span>Due</span><input type="date" name="due_date"></label><label class="field"><span>&nbsp;</span><label><input type="checkbox" name="committed" value="1"> our commitment</label> <label><input type="checkbox" name="customer_side" value="1"> waiting on customer</label></label><button>Add</button></form>
@@ -207,7 +234,7 @@ function overviewTab(a: Row, rel: Related, ev: Evaluation, x: Ctx, acts: Row[]):
   ${rel.tasks.some((k) => k.status !== "open") ? html`<details><summary>${rel.tasks.filter((k) => k.status !== "open").length} completed</summary><ul class="small muted">${rel.tasks.filter((k) => k.status !== "open").map((k) => html`<li>${fmt(k.done_at)} ${k.title}</li>`)}</ul></details>` : ""}
 
   <h2>Activity</h2>
-  <table class="small">${rel.meetings.map((m) => html`<tr><td class="nowrap">${fmt(m.occurred_at)}</td><td><span class="lbl">meeting</span> ${m.summary} <span class="muted">— ${m.author_name ?? ""}</span></td></tr>`)}</table>
+  <table class="small">${rel.meetings.map((m) => html`<tr><td class="nowrap">${fmt(m.occurred_at)}</td><td>Meeting: ${m.summary} <span class="muted">— ${m.author_name ?? ""}</span></td></tr>`)}</table>
   <details><summary>History (${acts.length})</summary><ul class="small muted">${acts.map((e) => { const p = parseJSON<Record<string, unknown>>(e.payload, {}); return html`<li>${fmt(e.at)} <span class="lbl">${s(e.event_type).replace(/_/g, " ")}</span> ${Object.entries(p).filter(([, val]) => val != null && val !== "").map(([k, val]) => `${k}: ${Array.isArray(val) ? val.join(", ") : String(val)}`).join(" · ")}${e.actor_name ? html` — ${e.actor_name}` : ""}</li>`; })}</ul></details>
   </div></div>`;
 }
@@ -369,7 +396,7 @@ export function handoffPage(a: Row, rel: Related, ev: Evaluation, x: Ctx): H {
   </div><div>
   <h2>Milestones</h2>${ms.length ? html`<ul class="small">${ms.map((k) => html`<li>${k.status === "open" ? "☐" : "☑"} ${fmt(k.due_date)} ${k.title} <span class="muted">(${k.owner_name ?? "unassigned"})</span></li>`)}</ul>` : html`<p class="amber small">None yet.</p>`}
   ${h?.stale_reason ? html`<p class="small amber">Amendment accepted: review whether these milestones need adjustment; nothing was changed automatically.</p>` : ""}
-  <h2>Unresolved risks</h2>${ev.signals.length ? html`<ul class="small">${ev.signals.map((sg) => html`<li>${sevLabel(sg.severity)} ${sg.reason}</li>`)}</ul>` : html`<p class="muted small">None flagged.</p>`}
+  <h2>Unresolved risks</h2>${ev.signals.length ? html`<ul class="small">${ev.signals.map((sg) => html`<li>${sevWord(sg.severity)} ${sg.reason}</li>`)}</ul>` : html`<p class="muted small">None flagged.</p>`}
   ${rel.blockers.filter((b) => !b.resolved_at).length ? html`<ul class="small">${rel.blockers.filter((b) => !b.resolved_at).map((b) => html`<li>Blocker: ${b.description}</li>`)}</ul>` : ""}
   <h2>Acceptance</h2>
   ${!h ? html`<p class="small muted">Backfilled existing engagement: no handoff packet was generated or accepted in this system.</p>` : h?.accepted_at && !h.stale_reason ? html`<p>Accepted ${fmt(h.accepted_at)} by ${h.accepted_by_name}.${h.acceptance_note ? html` <blockquote>${h.acceptance_note}</blockquote>` : ""}</p>` : html`<form method="post" action="/handoffs/${h?.id}/accept"><label class="field"><span>Note (what you are worried about, what you need)</span><input name="note" style="width:100%"></label><button class="primary" ${s(x.me?.id) === s(a.technical_owner_id) ? "" : "disabled"}>I accept this engagement as technical owner</button> ${s(x.me?.id) === s(a.technical_owner_id) ? "" : html`<span class="small muted">only ${a.technical_owner_name ?? "the technical owner"} can accept; switch identity top-right if that is you</span>`}</form>`}

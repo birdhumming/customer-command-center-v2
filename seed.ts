@@ -14,9 +14,9 @@ export async function seed(d: DB, opts: { force?: boolean; today?: string } = {}
   const T = (off: number, h = 10) => `${D(off)}T${String(h).padStart(2, "0")}:00:00.000Z`;
 
   const user = async (name: string, role: string) => { const id = uuid(); await d.run("INSERT INTO cc2_users(id,name,role) VALUES (?,?,?)", [id, name, role]); return id; };
-  const maya = await user("Maya Okafor", "sales");
-  const leo = await user("Leo Brandt", "engineer");
-  const priya = await user("Priya Natarajan", "delivery");
+  const maya = await user("Sales", "sales");
+  const leo = await user("Engineering", "engineer");
+  const priya = await user("Delivery", "delivery");
 
   type V = string | number | null;
   const ins = async (table: string, row: Record<string, V>) => { const id = uuid(); const cols = ["id", ...Object.keys(row)]; await d.run(`INSERT INTO cc2_${table}(${cols.join(",")}) VALUES (${cols.map(() => "?").join(",")})`, [id, ...Object.values(row)]); return id; };
@@ -30,7 +30,7 @@ export async function seed(d: DB, opts: { force?: boolean; today?: string } = {}
   const act = (account_id: string, off: number, actor_id: string, event_type: string, payload: Record<string, V>) => ins("activity", { account_id, actor_id, event_type, at: T(off, 11), payload: JSON.stringify(payload) });
   const H = (h: Record<string, unknown>) => JSON.stringify(h);
 
-  // ---------------------------------------------------------------- Northstar Support — Discovery (Maya; review pending for Leo)
+  // ---------------------------------------------------------------- Northstar Support — Discovery (Sales; review pending for Engineering)
   const ns = await account({
     name: "Northstar Support", owner_id: maya, technical_owner_id: null, contact: "Dana Whitcomb, Support Operations Lead", buyer: null, buyer_status: "unknown",
     problem: "Their Zendesk support agent confidently answers warranty questions with the wrong policy version. Dana has 14 example tickets where the agent cited a 2023 policy; nobody has measured how often it happens.",
@@ -43,9 +43,9 @@ export async function seed(d: DB, opts: { force?: boolean; today?: string } = {}
   const nsRev = await review(ns, { kind: "data_handling", question: "Does our 30-day grader audit log violate their §4.2 ZDR wording? Can we run the grader with retention off?", proposal_id: nsProp, requirements_id: nsReq, reviewer_id: leo, requested_by: maya, requested_at: T(-4) });
   await task(ns, "Data review: Northstar ZDR wording vs grader audit log", { type: "review", owner_id: leo, due_date: D(2), required: 1, automation_key: "review", subject_id: nsRev, created_by: maya, created_at: T(-4) });
   await task(ns, "Ask Dana who owns the CX budget; get an intro before pricing is shared", { owner_id: maya, due_date: D(1) });
-  await act(ns, -4, maya, "review_requested", { kind: "data_handling", reviewer: "Leo Brandt" });
+  await act(ns, -4, maya, "review_requested", { kind: "data_handling", reviewer: "Engineering" });
 
-  // ---------------------------------------------------------------- Atlas Commerce — Negotiation (Maya/Leo; external grader added after approval)
+  // ---------------------------------------------------------------- Atlas Commerce — Negotiation (Sales/Engineering; external grader added after approval)
   const at = await account({
     name: "Atlas Commerce", owner_id: maya, technical_owner_id: leo, contact: "Rob Hadley, Director of CX", buyer: "Imani Clarke, VP Customer Experience", buyer_status: "named",
     problem: "Returns-initiation chatbot resolves 61% of conversations unassisted; Imani wants 75% before peak season and a way to prove the number to Finance.", budget: "FY budget approved up to $60k",
@@ -65,7 +65,7 @@ export async function seed(d: DB, opts: { force?: boolean; today?: string } = {}
   await act(at, -2, maya, "review_reopened", { kind: "data_handling", reason: "New external grader added in proposal rev 2" });
   void atRev1; void atRev1d;
 
-  // ---------------------------------------------------------------- Harbor Operations — Won, onboarding pending (Maya sold; Priya delivers)
+  // ---------------------------------------------------------------- Harbor Operations — Won, onboarding pending (Sales sold; Delivery delivers)
   const hb = await account({
     name: "Harbor Operations", owner_id: maya, technical_owner_id: priya, contact: "Wei Zhang, Head of Dispatch Systems", buyer: "Dr. Amara Osei, COO", buyer_status: "named",
     problem: "Dispatch voice agent books ~4% of pickups to the wrong depot; staff re-book by hand. COO wants the error rate measured and under 1.5% before the second region goes live.", budget: "Signed",
@@ -87,7 +87,7 @@ export async function seed(d: DB, opts: { force?: boolean; today?: string } = {}
   await act(hb, -7, maya, "agreement_confirmed", { evidence: "Order form HO-2026-11" });
   await act(hb, -7, maya, "handoff_created", {});
 
-  // ---------------------------------------------------------------- Meridian Services — Active; renewal in 21d; overdue commitment (Priya owns; Leo tech)
+  // ---------------------------------------------------------------- Meridian Services — Active; renewal in 21d; overdue commitment (Delivery owns; Engineering tech)
   const md = await account({
     name: "Meridian Services", owner_id: priya, technical_owner_id: leo, contact: "Sam Odunaike, Knowledge Manager", buyer: "Helen Kessler-Moore, General Counsel", buyer_status: "named",
     problem: "Internal legal-research copilot cited non-existent cases; GC paused the partner roll-out until citation accuracy is demonstrably above 80% on the firm's own queries.", budget: "Innovation fund",
@@ -106,12 +106,12 @@ export async function seed(d: DB, opts: { force?: boolean; today?: string } = {}
   await task(md, "Renewal proposal to Helen; include the index-v4 re-baseline plan", { owner_id: priya, due_date: D(7), created_at: T(-9), updated_at: T(-9) });
   await task(md, "Weekly measurement: citation accuracy sample", { type: "measurement", owner_id: leo, due_date: D(3), committed: 1, created_at: T(-9), updated_at: T(-9) });
   await meeting(md, -9, "Monthly briefing with Sam (GC declined). Accuracy 71% on index v3. IT plans to re-index the brief bank (v4) next month; we flagged that the comparison will need a new baseline.", priya);
-  await meeting(md, -40, "Briefing with Sam and Helen. Helen asked for a regression report before she un-pauses partners; Leo committed to it by " + D(-4) + ".", priya);
+  await meeting(md, -40, "Briefing with Sam and Helen. Helen asked for a regression report before she un-pauses partners; Engineering committed to it by " + D(-4) + ".", priya);
   await ins("outcomes", { account_id: md, agreement_id: mdAg, metric: "Citation accuracy", unit: "%", direction: "higher", baseline: 62, baseline_basis: "weekly 400-query sample, index v3", target: 80, latest: 71, latest_basis: "weekly 400-query sample, index v3", measured_at: D(-9), version: 1, updated_at: T(-9) });
   await act(md, -9, priya, "health_assessed", { health: "watch" });
   await act(md, -9, leo, "outcome_recorded", { latest: 71 });
 
-  // ---------------------------------------------------------------- Cedar Analytics — Active, healthy (Priya owns; Leo tech)
+  // ---------------------------------------------------------------- Cedar Analytics — Active, healthy (Delivery owns; Engineering tech)
   const cd = await account({
     name: "Cedar Analytics", owner_id: priya, technical_owner_id: leo, contact: "Jon Castellano, Head of Support", buyer: "Renata Oyelaran, VP Operations", buyer_status: "named",
     problem: "Support copilot drafts replies for agents; escalations were 31% and they wanted a defensible number for the board.", budget: "Opex, renewed annually",

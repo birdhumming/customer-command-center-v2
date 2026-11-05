@@ -10,7 +10,7 @@ const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_An
 const login = await fetchApp(new Request("http://x/login", { method: "POST", body: new URLSearchParams({ passcode: "evalhouse" }) }));
 const cookie = login.headers.get("set-cookie")!.split(";")[0];
 const users = await d.all("SELECT * FROM cc2_users ORDER BY name"); // Leo, Maya, Priya
-const U = Object.fromEntries(users.map((u) => [String(u.name).split(" ")[0], String(u.id)]));
+const U = Object.fromEntries(users.map((u) => [({ sales: "Maya", engineer: "Leo", delivery: "Priya" } as Record<string, string>)[String(u.role)], String(u.id)]));
 async function post(path: string, body: Record<string, string>, me = U.Maya) {
   const r = await fetchApp(new Request("http://x" + path, { method: "POST", headers: { cookie: `${cookie}; ccc2_me=${me}` }, body: new URLSearchParams(body), redirect: "manual" }));
   return { status: r.status, loc: r.headers.get("location") ?? "", err: decodeURIComponent((r.headers.get("location") ?? "").split("err=")[1] ?? ""), text: r.status !== 302 ? await r.text() : "" };
@@ -114,7 +114,7 @@ Deno.test("health: Healthy does not hide automatic warnings; reason required", a
   const md = await acc("Meridian Services");
   assertMatch((await post(`/accounts/${md.id}/edit/health`, { health: "healthy", health_reason: "", version: String(md.version) }, U.Priya)).err, /needs a reason/);
   assertEquals((await post(`/accounts/${md.id}/edit/health`, { health: "healthy", health_reason: "GC said nice things", version: String(md.version) }, U.Priya)).status, 302);
-  const page = await get(`/accounts/${md.id}`); assertMatch(page.text, /Healthy/); assertMatch(page.text, /Renewal in \d+d and success not demonstrated/); assertMatch(page.text, /Committed work overdue/);
+  const page = await get(`/accounts/${md.id}`); assertMatch(page.text, /Healthy/); assertMatch(page.text, /Renewal in \d+d; 71% vs target 80%/); assertMatch(page.text, /late, promised to the customer/);
 });
 Deno.test("requirements mismatch: specified 'no external processing' vs rev 2 proposal -> critical conflict; current agreement untouched", async () => {
   const hb = await acc("Harbor Operations");
@@ -171,7 +171,7 @@ Deno.test("revops findings: existing-customer backfill, unowned action flagged, 
   let r = await post("/accounts", { name: "Thistle & Vine", owner_id: U.Priya, contact: "Imogen", existing: "1", ex_deliverables: "Quarterly eval of the sommelier agent", ex_price_terms: "$36k/yr", ex_success_metric: "Wrong-pairing rate", ex_success_target: "5", ex_success_unit: "%", ex_success_direction: "lower", ex_technical_owner_id: U.Leo, ex_evidence: "Order form TV-2 signed 2026-03-01", ex_started: "2026-03-01", ex_renewal_date: addDays(today, 50), ex_notice_days: "60" }, U.Priya);
   assertEquals(r.status, 302, r.text.slice(0, 300));
   const tv = await acc("Thistle & Vine"); assertEquals(tv.sales_stage, "won"); assertEquals(tv.delivery_status, "active"); assert(tv.current_agreement_id);
-  let page = await get(`/accounts/${tv.id}`); assertMatch(page.text, /Renewal notice deadline 10d overdue/); assertMatch(page.text, /data restrictions unknown/);
+  let page = await get(`/accounts/${tv.id}`); assertMatch(page.text, /Renewal notice deadline 10d overdue/); assertMatch(page.text, /data restrictions not recorded yet/);
   page = await get(`/accounts/${tv.id}/handoff`); assertMatch(page.text, /Backfilled existing engagement/);
   // sales cannot be the backfilled technical owner; validation errors re-render the form with input kept
   r = await post("/accounts", { name: "Bad Backfill", owner_id: U.Maya, existing: "1", ex_deliverables: "x", ex_price_terms: "y", ex_success_metric: "m", ex_success_target: "1", ex_technical_owner_id: U.Maya, ex_evidence: "e", ex_started: "2026-01-01" });

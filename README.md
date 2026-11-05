@@ -2,7 +2,7 @@
 
 Internal workspace for a small team selling and delivering AI-agent evaluation and improvement services. The primary question it answers: **what needs my attention, why, and what should I do next?**
 
-- Live: https://devinbugbasher--727ba386d8cb11f181b81607ee4eb77e.web.val.run (passcode `evalhouse-v2`, then pick a teammate top-right: Maya sells, Leo is the engineer, Priya delivers)
+- Live: https://devinbugbasher--727ba386d8cb11f181b81607ee4eb77e.web.val.run (passcode `evalhouse-v2`, then pick the role you are acting as: Sales, Engineering or Delivery)
 - Write-up and design decisions: [WRITEUP.md](WRITEUP.md)
 - Shared persistence: one SQLite database on Val Town; every change is visible to the next browser.
 

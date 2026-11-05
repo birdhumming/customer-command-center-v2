@@ -53,11 +53,11 @@ export function conflicts(req: Row | null | undefined, p: Row | null | undefined
 export function clarifications(req: Row | null | undefined, p: Row | null | undefined): string[] {
   const out: string[] = [];
   if (!p) return out;
-  if (!req || req.restriction_status === "unknown") { out.push("data restrictions unknown — unknown is not permission"); return out; }
+  if (!req || req.restriction_status === "unknown") { out.push("customer data restrictions not recorded yet"); return out; }
   if (req.restriction_status !== "specified") return out;
   const h = handlingOf(p);
   if (req.external_processing === "unknown" && (h.external_processing === "yes" || (h.external_processors ?? []).length)) out.push("customer's position on external processing unknown; proposal uses external processors");
-  if (req.retention === "custom") out.push(`customer retention wording is custom (${s(req.retention_note) || "see wording"}); confirm handling matches`);
+  if (req.retention === "custom") out.push("customer retention wording is custom; check the proposal's handling against it");
   if (req.training_use === "unknown" && h.training_use === "yes") out.push("customer's position on training use unknown; proposal declares training use");
   if (!h.external_processing && !h.retention) out.push("proposed data handling not yet declared by the technical owner");
   return out;
@@ -93,6 +93,7 @@ export function reviewStates(account: Row, rel: Related): ReviewState[] {
 
 // ---- outcome ----------------------------------------------------------------------------------------
 export type OutcomeStatus = "none" | "not_measured" | "not_comparable" | "met" | "below";
+export function outcomeShort(o: Row | null): string { const st = outcomeStatus(o); if (st.status === "met") return `${o!.latest}${s(o!.unit)} vs target ${o!.target}${s(o!.unit)}, met`; if (st.status === "below") return `${o!.latest}${s(o!.unit)} vs target ${o!.target}${s(o!.unit)}`; if (st.status === "not_comparable") return "latest result measured on a different basis than the baseline"; if (st.status === "not_measured") return "success not measured yet"; return "no success metric recorded"; }
 export function outcomeStatus(o: Row | null): { status: OutcomeStatus; why: string } {
   if (!o) return { status: "none", why: "no success metric recorded" };
   if (o.latest == null) return { status: "not_measured", why: o.not_measured_reason ? `not yet measured: ${o.not_measured_reason}` : "not yet measured" };
@@ -141,7 +142,7 @@ export function evaluateAccount(a: Row, rel: Related, today: string): Evaluation
       else sig("waiting_on_customer", "warning", `Waiting on customer: ${t.title} (by ${t.due_date})`, s(t.owner_id) || owner, "open_account", s(t.id));
     }
     for (const t of openTasks(rel).filter((t) => t.committed && !t.customer_side && overdue(t, today))) {
-      sig("overdue_commitment", "high", `Committed ${t.type === "milestone" ? "milestone" : "work"} overdue ${daysBetween(s(t.due_date), today)}d: ${t.title}`, s(t.owner_id) || owner, t.type === "review" ? "decide_review" : "complete_task", s(t.id));
+      sig("overdue_commitment", "high", `${t.title} — ${daysBetween(s(t.due_date), today)}d late, promised to the customer`, s(t.owner_id) || owner, t.type === "review" ? "decide_review" : "complete_task", s(t.id));
     }
     // handoff
     const h = rel.handoffs.find((x) => x.agreement_id === a.current_agreement_id);
@@ -149,8 +150,8 @@ export function evaluateAccount(a: Row, rel: Related, today: string): Evaluation
     // delivery
     const openBlockers = rel.blockers.filter((b) => !b.resolved_at);
     const lateMilestones = openTasks(rel).filter((t) => t.type === "milestone" && t.committed && overdue(t, today));
-    if (openBlockers.length && lateMilestones.length) sig("delivery_intervention", "high", `Blocker open (${openBlockers[0].description}) and milestone overdue (${lateMilestones[0].title})`, techOwner ?? owner, "request_delivery_review");
-    else if (openBlockers.length && a.delivery_status) sig("blocker_open", "warning", `Blocker open ${daysBetween(s(openBlockers[0].opened_at), today)}d: ${openBlockers[0].description}`, s(openBlockers[0].owner_id) || techOwner || owner, "resolve_blocker", s(openBlockers[0].id));
+    if (openBlockers.length && lateMilestones.length) sig("delivery_intervention", "high", `${lateMilestones[0].title} is late and a blocker is open: ${s(openBlockers[0].description).slice(0, 70)}`, techOwner ?? owner, "request_delivery_review");
+    else if (openBlockers.length && a.delivery_status) sig("blocker_open", "warning", `Blocker open ${daysBetween(s(openBlockers[0].opened_at), today)}d: ${s(openBlockers[0].description).slice(0, 70)}`, s(openBlockers[0].owner_id) || techOwner || owner, "resolve_blocker", s(openBlockers[0].id));
     // renewal
     if (a.renewal_date && a.delivery_status && a.delivery_status !== "ended") {
       const notice = Number(a.renewal_notice_days) || 0;
@@ -158,12 +159,12 @@ export function evaluateAccount(a: Row, rel: Related, today: string): Evaluation
       const what = notice ? `Renewal notice deadline` : `Renewal`;
       const when = left < 0 ? `${-left}d overdue` : `in ${left}d`;
       const os = outcomeStatus(rel.outcome);
-      if (left <= RENEWAL_WINDOW_DAYS && os.status !== "met") sig("renewal_intervention", "high", `${what} ${when} and success not demonstrated (${os.why})`, owner, "request_success_review");
+      if (left <= RENEWAL_WINDOW_DAYS && os.status !== "met") sig("renewal_intervention", "high", `${what} ${when}; ${outcomeShort(rel.outcome)}`, owner, "request_success_review");
       else if (left <= RENEWAL_WINDOW_DAYS && !openTasks(rel).some((t) => /renew|expan/i.test(s(t.title)))) sig("renewal_step_missing", "warning", `${what} ${when} with no renewal or expansion action`, owner, "add_action");
     }
     if (a.delivery_status && a.delivery_status !== "ended") {
       const os = outcomeStatus(rel.outcome);
-      if (os.status === "below" && a.delivery_status === "active") sig("below_target", "warning", `Latest result below target (${os.why})`, techOwner ?? owner, "record_outcome");
+      if (os.status === "below" && a.delivery_status === "active") sig("below_target", "warning", `Below target: ${outcomeShort(rel.outcome)}`, techOwner ?? owner, "record_outcome");
       const since = daysBetween(s(a.last_customer_contact_at || a.created_at), today);
       if (since >= CHECKIN_DAYS && !waiting.some((t) => !overdue(t, today))) sig("checkin_overdue", "warning", a.last_customer_contact_at ? `No customer check-in for ${since}d` : "No customer meeting ever logged", owner, "log_meeting");
       if (a.expansion_note && !openTasks(rel).some((t) => /expan/i.test(s(t.title)))) sig("expansion_unowned", "warning", "Expansion noted with no owned, dated action", owner, "add_action");
