@@ -1,0 +1,9 @@
+{
+  "tasks": {
+    "dev": "deno run -A --watch main.ts",
+    "test": "deno test -A",
+    "seed": "deno run -A seed.ts",
+    "reseed": "deno run -A seed.ts --force"
+  },
+  "compilerOptions": { "strict": true }
+}
