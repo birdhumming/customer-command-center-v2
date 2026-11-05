@@ -221,7 +221,7 @@ Deno.test("continual grading: calibration feeds the baseline; low agreement and 
   // a better session replaces it; the old one is kept but no longer "in use"
   r = await post(`/accounts/${ns.id}/calibrations`, { source: "production_sample", n_examples: "120", agreement: "88", grader_version: "metagrader v2", metric: "Policy-incorrect answers", baseline: "19", unit: "%", direction: "lower", apply: "1" }, U.Leo);
   assertEquals(r.status, 302, r.err);
-  assertEquals(Number((await d.get("SELECT COUNT(*) c FROM cc2_calibrations WHERE account_id=?", [ns.id]))!.c), 2);
+  assertEquals(Number((await d.get("SELECT COUNT(*) c FROM cc2_calibrations WHERE account_id=?", [ns.id]))!.c), 3); // seed already has one Northstar calibration
   assertEquals(Number((await d.get("SELECT COUNT(*) c FROM cc2_calibrations WHERE account_id=? AND applied=1", [ns.id]))!.c), 1);
   page = await get(`/accounts/${ns.id}`); assert(!/Grader agrees with the expert on 74%/.test(page.text));
   assertMatch((await post(`/accounts/${ns.id}/calibrations`, { source: "production_sample", n_examples: "x" }, U.Leo)).err, /whole number/);
