@@ -3,7 +3,7 @@
 const token = Deno.env.get("VALTOWN_API_TOKEN") ?? Deno.env.get("VAL_TOWN_API_KEY");
 if (!token) throw new Error("set VALTOWN_API_TOKEN");
 const argv = Object.fromEntries(Deno.args.map((a, i, all) => a.startsWith("--") ? [a.slice(2), all[i + 1]] : []).filter((x) => x.length));
-const name = argv.name ?? "customer-command-center";
+const name = argv.name ?? "customer-command-center-v2";
 const H = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 const api = async (method: string, path: string, body?: unknown) => {
   const r = await fetch("https://api.val.town" + path, { method, headers: H, body: body == null ? undefined : JSON.stringify(body) });
@@ -14,7 +14,7 @@ const api = async (method: string, path: string, body?: unknown) => {
 let id = "";
 try { id = (await Deno.readTextFile(".valtown-id")).trim(); } catch { /* first deploy */ }
 if (!id) {
-  const v = await api("POST", "/v2/vals", { name, privacy: "public", description: "Evalhouse Customer Command Center" });
+  const v = await api("POST", "/v2/vals", { name, privacy: "public", description: "Customer Command Center v2" });
   id = v.id; await Deno.writeTextFile(".valtown-id", id);
   console.log("created val", id);
 }

@@ -106,7 +106,7 @@ Deno.test("10 missing vs zero; changed basis is not comparable; 409-style stale 
   r = await post(`/accounts/${cd.id}/outcome`, { metric: String(o.metric), latest: "", version: String(o.version) }, U.Priya); assertMatch(r.err, /changed since you opened it/);
   r = await post(`/accounts/${cd.id}/outcome`, { metric: String(o.metric), latest: "74%x", version: String(Number(o.version) + 2) }, U.Priya); assertMatch(r.err, /must be a number/);
   // account-level 409 on a stale form
-  const stale = await post(`/accounts/${cd.id}/edit/overview`, { contact: "Jon", buyer_status: "named", buyer: "Renata", version: "1" }); assertMatch(stale.err, /Someone else changed/);
+  const stale = await post(`/accounts/${cd.id}/edit/overview`, { contact: "Jon", buyer_status: "named", buyer: "Renata", version: "99" }); assertMatch(stale.err, /Someone else changed/);
 });
 Deno.test("health: Healthy does not hide automatic warnings; reason required", async () => {
   const md = await acc("Meridian Services");
