@@ -2,7 +2,7 @@
 import { html, raw } from "npm:hono@4.6.14/html";
 import type { HtmlEscapedString } from "npm:hono@4.6.14/utils/html";
 import type { Row } from "./db.ts";
-import { ACTIVITIES, addDays, attention, daysBetween, type Evaluation, handlingOf, isPresales, latest, LOST_REASONS, n, outcomeStatus, parseJSON, type Related, REVIEW_KINDS, reviewStates, s, SEVERITY_LABEL, type Signal, STAGE_LABEL, STALLED_DAYS, RENEWAL_WINDOW_DAYS } from "./rules.ts";
+import { ACTIVITIES, addDays, attention, daysBetween, type Evaluation, handlingOf, isPresales, latest, LOST_REASONS, n, outcomeStatus, parseJSON, type Related, REVIEW_KINDS, reviewStates, s, SEVERITY_LABEL, type Signal, STAGE_LABEL, STALLED_DAYS, RENEWAL_WINDOW_DAYS, CHECKIN_DAYS } from "./rules.ts";
 
 export type H = HtmlEscapedString | Promise<HtmlEscapedString>;
 interface Ctx { me: Row | null; users: Row[]; today: string; path: string; msg: { err?: string; saved?: boolean } }
@@ -380,7 +380,12 @@ export function howAlertsWork(): H {
   <tr><td>Overdue commitment</td><td>Incomplete committed task due before today</td><td>High · owner completes it</td></tr>
   <tr><td>Handoff pending</td><td>Agreement confirmed, technical owner has not accepted</td><td>High · accept handoff</td></tr>
   <tr><td>Delivery intervention</td><td>Open blocker and an overdue committed milestone</td><td>High · request delivery-plan review</td></tr>
-  <tr><td>Renewal intervention</td><td>Renewal within ${RENEWAL_WINDOW_DAYS} days (or past) and the latest comparable result misses target or is missing</td><td>High · request success review</td></tr>
+  <tr><td>Renewal intervention</td><td>Renewal decision deadline (renewal date minus the notice period, if any) within ${RENEWAL_WINDOW_DAYS} days or past, and the latest comparable result misses target or is missing</td><td>High · request success review</td></tr>
+  <tr><td>Customer late</td><td>An action marked "waiting on customer" is past its date</td><td>High · log meeting. Customer-side items never count as our commitments.</td></tr>
+  <tr><td>Waiting on customer</td><td>An action marked "waiting on customer" is pending</td><td>Warning · shown instead of "stalled" while the date has not passed</td></tr>
+  <tr><td>Below target</td><td>Active account whose latest comparable result misses the target, regardless of renewal date</td><td>Warning · record outcome / plan remediation</td></tr>
+  <tr><td>Check-in overdue</td><td>Post-sale account with no customer meeting for ${CHECKIN_DAYS} days (or none ever)</td><td>Warning · log meeting</td></tr>
+  <tr><td>Expansion unowned</td><td>Expansion noted but no open action mentioning it</td><td>Warning · add action</td></tr>
   <tr><td>Stalled prospect</td><td>Open presales account with no customer contact for ${STALLED_DAYS} days (created date if never contacted)</td><td>Warning · log meeting</td></tr>
   <tr><td>Missing next step</td><td>Open account with no incomplete dated action</td><td>Warning · add action</td></tr>
   <tr><td>Clarification</td><td>Restrictions unknown, custom wording, or undeclared handling</td><td>Warning · record restrictions / declare handling</td></tr>
