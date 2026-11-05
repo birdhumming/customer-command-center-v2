@@ -75,7 +75,36 @@ Five accounts, three teammates, dates relative to seed day so the conditions hol
 
 ## 7. Adverse review
 
-_(filled in after the persona sessions report)_
+Two reviewer sessions worked the live app with the earlier messy scenarios (Halden Health, Lattice Payroll, Thistle & Vine, Kessler Roth, Caldera Freight) plus raw POSTs.
+
+### 7.1 Hiring manager — "HIRE (lean, not strong)" before fixes
+
+Held: stage skipping, Lost from Won, three concurrent Confirm agreement → one agreement, deciding a closed review, closing a review task via the checkbox, waiving validation with unknown restrictions, accepting a handoff as the wrong person.
+
+| # | Finding | Severity | Fix |
+|---|---|---|---|
+| 1 | Anyone could decide any review; sales could self-approve | blocker | Decide requires `me == reviewer_id`; technical/data reviews need a non-sales role (request and decide) |
+| 2 | Missing identity cookie fell back to the first user | blocker | POST without a valid identity → 403; no fallback |
+| 3 | `unknown` restrictions let Caldera reach Won with no data review; specified→unknown erased a Critical | blocker | Data review required unless restrictions are explicitly "none stated" (with evidence); Won gate requires restrictions recorded; specified→unknown rejected; clarification warnings no longer suppressed post-sale |
+| 4 | Version check was opt-in (missing `version` → accepted) | major | Missing/garbled version is treated as stale |
+| 5 | Sales could set themselves as technical owner, accept their own handoff, then clear the owner | major | Technical owner must be non-sales; cannot be cleared on a Won account |
+| 6 | Lost/Ended accounts fully writable | major | Read-only except stage change (reopen with reason) |
+| 7 | Two 500s (bogus owner on blockers, on meeting follow-up) | major | Owners validated; fallback to account/technical owner |
+| 8 | Dates: `9999-12-31` stored, `2025-02-30` stored, invalid dates silently replaced by today | major | Strict round-trip validation, 2000–2100, future meetings/acceptance/measurement rejected, never substituted |
+| 9 | Enum fields were free text; `success_target=abc` → NULL silently; negative budget | major | Enums validated on proposals and requirements; non-numeric target rejected; budget 0–1e9 |
+| 10 | Handoff did not show what rev 1 promised that the accepted rev dropped (Lattice "weekly reports") | major | Handoff section "Changed before acceptance": change notes and rev-1→accepted field diffs |
+| 11 | Renewal had no notice period; expansion was an unowned note | major | `renewal_notice_days`; renewal signals run against the decision deadline; expansion note without an owned action → warning |
+| 12 | Post-sale risk thin: below target outside 30d, never-met customer, one-click "Mark done" on a commitment from My work | major | `below_target` and `checkin_overdue` (30d) signals; My work links to the commitment instead of completing it |
+| 13 | Could not express "waiting on counsel until the 14th" vs stalled | major | Actions can be "waiting on customer": suppresses stalled while pending, becomes "Customer late" when past due, never counts as our commitment |
+| 14 | Errors from Scope/Delivery forms lost the tab (`?tab=scope?err=`) | minor | `back()` joins query params correctly |
+| 15 | Blocker "open -1d" (UTC vs LA) | minor | Blocker open date recorded in LA |
+| 16 | Stale message named only the proposal revision | minor | Names proposal and restrictions revisions |
+
+Not fixed, by choice: meeting attendees (so "buyer never in a meeting" is still a note), a baseline field on the proposal (contested baselines live in `success_basis`), unresolved commercial terms as structured items (uncapped indemnity is prose in `price_terms`), amendments that widen scope at the same price are not flagged, and the three unconsumed review kinds remain selectable.
+
+### 7.2 RevOps working day
+
+_(pending)_
 
 ## 8. Three bullets on design and tradeoffs
 
