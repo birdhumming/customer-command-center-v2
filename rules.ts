@@ -93,7 +93,7 @@ export function reviewStates(account: Row, rel: Related): ReviewState[] {
 
 // ---- outcome ----------------------------------------------------------------------------------------
 export type OutcomeStatus = "none" | "not_measured" | "not_comparable" | "met" | "below";
-export function outcomeShort(o: Row | null): string { const st = outcomeStatus(o); if (st.status === "met") return `${o!.latest}${s(o!.unit)} vs target ${o!.target}${s(o!.unit)}, met`; if (st.status === "below") return `${o!.latest}${s(o!.unit)} vs target ${o!.target}${s(o!.unit)}`; if (st.status === "not_comparable") return "latest result measured on a different basis than the baseline"; if (st.status === "not_measured") return "success not measured yet"; return "no success metric recorded"; }
+export function outcomeShort(o: Row | null): string { const st = outcomeStatus(o); if (st.status === "met") return `${o!.latest}${s(o!.unit)} vs target ${o!.target}${s(o!.unit)}, met`; if (st.status === "below") return `${o!.latest}${s(o!.unit)} vs target ${o!.target}${s(o!.unit)}`; if (st.status === "not_comparable") return "not comparable: latest result was measured on a different basis than the baseline"; if (st.status === "not_measured") return "success not measured yet"; return "no success metric recorded"; }
 export function outcomeStatus(o: Row | null): { status: OutcomeStatus; why: string } {
   if (!o) return { status: "none", why: "no success metric recorded" };
   if (o.latest == null) return { status: "not_measured", why: o.not_measured_reason ? `not yet measured: ${o.not_measured_reason}` : "not yet measured" };
