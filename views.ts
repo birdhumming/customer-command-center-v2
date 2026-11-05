@@ -371,6 +371,7 @@ export function howAlertsWork(): H {
   <tr><td>Clarification</td><td>Restrictions unknown, custom wording, or undeclared handling</td><td>Warning · record restrictions / declare handling</td></tr>
   <tr><td>Nonblocking gaps</td><td>Budget unknown, baseline missing</td><td>Warning · edit</td></tr></table>
   <h2>What stays human</h2><p>Confirming a customer agreement (with evidence), deciding a review, accepting a handoff, assessing relationship health (with a reason), recording a measurement, and ending an engagement. Automatic warnings cannot be hidden by choosing "Healthy". Nothing sends external messages.</p>
-  <h2>Dedup and reopen</h2><p>One automation task per (account, rule, subject). Repeated requests reopen the same task. Resolving the source resolves the alert; recurrence reopens it. Reviews close through their decision, not a checkbox.</p>`;
+  <h2>Dedup and reopen</h2><p>One automation task per (account, rule, subject). Repeated requests reopen the same task. Resolving the source resolves the alert; recurrence reopens it. Reviews close through their decision, not a checkbox.</p>${reseedForm()}`;
 }
+export function reseedForm(): H { return html`<h2>Reset shared data</h2><form method="post" action="/admin/reseed" class="row small"><label class="field"><span>Team passcode (again)</span><input type="password" name="passcode"></label><button>Reset to the seed scenario</button></form><p class="small muted">Deletes every record and reloads the five seeded accounts. Shared with everyone using the app.</p>`; }
 export { attention, n };

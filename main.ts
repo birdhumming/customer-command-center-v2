@@ -446,6 +446,13 @@ app.post("/accounts/:id/outcome", async (c) => {
   return back(c, accPath(id, "delivery"), undefined, true);
 });
 
+// Reset shared data to the seed; asks for the passcode again so it is not one click from wiping shared data.
+app.post("/admin/reseed", async (c) => {
+  const f = await c.req.parseBody() as Body;
+  if (str(f, "passcode") !== PASSCODE) return c.text("wrong passcode", 401);
+  await seed(d, { force: true });
+  return c.redirect("/?saved=1");
+});
 app.notFound(async (c) => { const x = await ctx(c); return page(c, x, "Not found", V.notFound(), 404); });
 app.onError((e, c) => { console.error(e); return c.text("Something went wrong on the server: " + e.message, 500); });
 
