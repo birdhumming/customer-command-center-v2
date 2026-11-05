@@ -5,21 +5,21 @@ import { addDays } from "./rules.ts";
 
 export async function seed(d: DB, opts: { force?: boolean; today?: string } = {}) {
   await ensureSchema(d);
-  if (Number((await d.get("SELECT COUNT(*) c FROM accounts"))?.c) > 0 && !opts.force) return false;
-  for (const t of ["activity", "outcomes", "blockers", "meetings", "tasks", "handoffs", "reviews", "accounts_agreements_tmp"]) if (t !== "accounts_agreements_tmp") await d.run(`DELETE FROM ${t}`);
-  await d.run("UPDATE accounts SET current_agreement_id=NULL");
-  for (const t of ["agreements", "requirements", "proposals", "accounts", "users"]) await d.run(`DELETE FROM ${t}`);
+  if (Number((await d.get("SELECT COUNT(*) c FROM cc2_accounts"))?.c) > 0 && !opts.force) return false;
+  for (const t of ["activity", "outcomes", "blockers", "meetings", "tasks", "handoffs", "reviews", "accounts_agreements_tmp"]) if (t !== "accounts_agreements_tmp") await d.run(`DELETE FROM cc2_${t}`);
+  await d.run("UPDATE cc2_accounts SET current_agreement_id=NULL");
+  for (const t of ["agreements", "requirements", "proposals", "accounts", "users"]) await d.run(`DELETE FROM cc2_${t}`);
   const today = opts.today ?? new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
   const D = (off: number) => addDays(today, off);
   const T = (off: number, h = 10) => `${D(off)}T${String(h).padStart(2, "0")}:00:00.000Z`;
 
-  const user = async (name: string, role: string) => { const id = uuid(); await d.run("INSERT INTO users(id,name,role) VALUES (?,?,?)", [id, name, role]); return id; };
+  const user = async (name: string, role: string) => { const id = uuid(); await d.run("INSERT INTO cc2_users(id,name,role) VALUES (?,?,?)", [id, name, role]); return id; };
   const maya = await user("Maya Okafor", "sales");
   const leo = await user("Leo Brandt", "engineer");
   const priya = await user("Priya Natarajan", "delivery");
 
   type V = string | number | null;
-  const ins = async (table: string, row: Record<string, V>) => { const id = uuid(); const cols = ["id", ...Object.keys(row)]; await d.run(`INSERT INTO ${table}(${cols.join(",")}) VALUES (${cols.map(() => "?").join(",")})`, [id, ...Object.values(row)]); return id; };
+  const ins = async (table: string, row: Record<string, V>) => { const id = uuid(); const cols = ["id", ...Object.keys(row)]; await d.run(`INSERT INTO cc2_${table}(${cols.join(",")}) VALUES (${cols.map(() => "?").join(",")})`, [id, ...Object.values(row)]); return id; };
   const account = (r: Record<string, V>) => ins("accounts", { buyer_status: "not_assessed", health: "unknown", version: 1, created_at: T(-30), updated_at: T(0), ...r });
   const proposal = (account_id: string, revision: number, r: Record<string, V>) => ins("proposals", { account_id, revision, created_at: T(-10), ...r });
   const requirement = (account_id: string, revision: number, r: Record<string, V>) => ins("requirements", { account_id, revision, created_at: T(-10), ...r });
@@ -76,7 +76,7 @@ export async function seed(d: DB, opts: { force?: boolean; today?: string } = {}
   await review(hb, { kind: "technical_validation", question: "Feasible from transcripts without audio?", proposal_id: hbP, requirements_id: hbReq, reviewer_id: priya, status: "approved", decision_note: "Yes; depot names are in the transcript.", decided_at: T(-12), requested_by: maya, requested_at: T(-15) });
   await review(hb, { kind: "data_handling", question: "Handling matches Schedule B?", proposal_id: hbP, requirements_id: hbReq, reviewer_id: priya, status: "approved", decision_note: "In-tenant processing; deletion plan documented.", decided_at: T(-12), requested_by: maya, requested_at: T(-15) });
   const hbAg = await ins("agreements", { account_id: hb, proposal_id: hbP, requirements_id: hbReq, accepted_by: maya, accepted_at: T(-7), acceptance_evidence: "Order form HO-2026-11 signed by Dr. Osei (DocuSign envelope 4F2A)", created_at: T(-7) });
-  await d.run("UPDATE accounts SET current_agreement_id=? WHERE id=?", [hbAg, hb]);
+  await d.run("UPDATE cc2_accounts SET current_agreement_id=? WHERE id=?", [hbAg, hb]);
   const hbHand = await ins("handoffs", { account_id: hb, agreement_id: hbAg, created_at: T(-7) });
   await task(hb, "Accept handoff: Harbor Operations", { type: "handoff", owner_id: priya, due_date: D(-2), required: 1, automation_key: "handoff", subject_id: hbHand, created_by: maya, created_at: T(-7) });
   await task(hb, "Baseline evaluation set agreed with Wei (400 calls, depot list v1)", { type: "milestone", owner_id: priya, due_date: D(5), committed: 1, required: 1, created_by: maya, created_at: T(-7) });
@@ -98,7 +98,7 @@ export async function seed(d: DB, opts: { force?: boolean; today?: string } = {}
   await review(md, { kind: "technical_validation", question: "In-tenant grader feasible?", proposal_id: mdP, requirements_id: mdReq, reviewer_id: leo, status: "approved", decision_note: "Yes, Azure-hosted grader.", decided_at: T(-346), requested_by: priya, requested_at: T(-348) });
   await review(md, { kind: "data_handling", question: "Matches §7?", proposal_id: mdP, requirements_id: mdReq, reviewer_id: leo, status: "approved", decision_note: "In-tenant only; confirmed.", decided_at: T(-346), requested_by: priya, requested_at: T(-348) });
   const mdAg = await ins("agreements", { account_id: md, proposal_id: mdP, requirements_id: mdReq, accepted_by: priya, accepted_at: T(-344), acceptance_evidence: "Engagement letter countersigned by H. Kessler-Moore", created_at: T(-344) });
-  await d.run("UPDATE accounts SET current_agreement_id=? WHERE id=?", [mdAg, md]);
+  await d.run("UPDATE cc2_accounts SET current_agreement_id=? WHERE id=?", [mdAg, md]);
   const mdHand = await ins("handoffs", { account_id: md, agreement_id: mdAg, created_at: T(-344), accepted_by: leo, accepted_at: T(-342), acceptance_note: "Accepted; index metadata access confirmed." });
   void mdHand;
   await task(md, "Kickoff and baseline run", { type: "milestone", owner_id: leo, due_date: D(-330), status: "done", done_at: T(-331), committed: 1, required: 1, created_at: T(-344), updated_at: T(-331) });
@@ -122,7 +122,7 @@ export async function seed(d: DB, opts: { force?: boolean; today?: string } = {}
   const cdP = await proposal(cd, 1, { deliverables: "Escalation-rate evaluation on sampled drafts; weekly review; quarterly board one-pager", exclusions: null, price_terms: "$48,000 / 12 months", dates: "Term " + D(-215) + " to " + D(150), customer_responsibilities: "Weekly export; one reviewer", success_metric: "Escalation rate on copilot-drafted replies", success_unit: "%", success_direction: "lower", success_target: 20, success_basis: "weekly sample, grader v1", handling: H({ activities: ["grading"], external_processors: ["hosted LLM grader (OpenAI)"], external_processing: "yes", retention: "none", training_use: "no" }), shared_at: D(-225), created_by: priya, created_at: T(-228) });
   await review(cd, { kind: "technical_validation", question: "Feasible?", proposal_id: cdP, requirements_id: cdReq, reviewer_id: leo, status: "approved", decision_note: "Standard setup.", decided_at: T(-222), requested_by: priya, requested_at: T(-226) });
   const cdAg = await ins("agreements", { account_id: cd, proposal_id: cdP, requirements_id: cdReq, accepted_by: priya, accepted_at: T(-215), acceptance_evidence: "Order form CA-2026-03, signed R. Oyelaran", created_at: T(-215) });
-  await d.run("UPDATE accounts SET current_agreement_id=? WHERE id=?", [cdAg, cd]);
+  await d.run("UPDATE cc2_accounts SET current_agreement_id=? WHERE id=?", [cdAg, cd]);
   await ins("handoffs", { account_id: cd, agreement_id: cdAg, created_at: T(-215), accepted_by: leo, accepted_at: T(-214), acceptance_note: "Accepted." });
   await task(cd, "Kickoff and baseline", { type: "milestone", owner_id: leo, due_date: D(-200), status: "done", done_at: T(-201), committed: 1, required: 1, created_at: T(-215), updated_at: T(-201) });
   await task(cd, "Weekly review with Jon", { owner_id: priya, due_date: D(3), created_at: T(-4), updated_at: T(-4) });
