@@ -6,6 +6,8 @@ Internal workspace for a small team selling and delivering AI-agent evaluation a
 - Write-up and design decisions: [WRITEUP.md](WRITEUP.md)
 - Shared persistence: one SQLite database on Val Town; every change is visible to the next browser.
 
+Public self-serve page: `/grade` (no passcode) — a prospect grades 5-20 pasted outputs and becomes a Discovery lead.
+
 ## Run locally
 ```
 deno task dev        # http://localhost:8010, seeds on first start (passcode: evalhouse)

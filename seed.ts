@@ -130,6 +130,11 @@ export async function seed(d: DB, opts: { force?: boolean; today?: string } = {}
   await meeting(cd, -4, "Weekly review. Escalations 18% (target 20). Renata joined for ten minutes and asked about the billing-dispute agent.", priya);
   await ins("outcomes", { account_id: cd, agreement_id: cdAg, metric: "Escalation rate on copilot-drafted replies", unit: "%", direction: "lower", baseline: 31, baseline_basis: "weekly sample, grader v1", target: 20, latest: 18, latest_basis: "weekly sample, grader v1", measured_at: D(-4), version: 1, updated_at: T(-4) });
   await act(cd, -4, priya, "health_assessed", { health: "healthy" });
+
+  // ---------------------------------------------------------------- grading calibrations (what "good" means, measured)
+  await ins("calibrations", { account_id: ns, source: "redacted_sample", n_examples: 40, agreement: 74, grader_version: "metagrader v1", metric: "Policy-incorrect answers", baseline: 23, unit: "%", direction: "lower", failure_categories: JSON.stringify([{ label: "cites retired policy", count: 6 }, { label: "wrong refund window", count: 3 }, { label: "escalates when it should answer", count: 2 }]), expert: "Dana Whitcomb", notes: "Dana disputes 4 of the 40 grades; the ZDR question decides whether a production sample is possible.", applied: 1, recorded_by: leo, created_at: T(-6) });
+  await ins("calibrations", { account_id: cd, source: "production_sample", n_examples: 300, agreement: 88, grader_version: "grader v1", metric: "Escalation rate on copilot-drafted replies", baseline: 31, unit: "%", direction: "lower", failure_categories: JSON.stringify([{ label: "missing order context", count: 41 }, { label: "tone", count: 17 }]), expert: "Cedar support QA lead", notes: null, applied: 1, recorded_by: leo, created_at: T(-200) });
+
   return true;
 }
 

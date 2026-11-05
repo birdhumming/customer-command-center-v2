@@ -139,3 +139,22 @@ Confirmed working on the fixed build by the reviewer: "waiting on customer" (Hal
 1. **Revisions, snapshots and bound reviews instead of editable fields.** Proposals and customer restrictions are immutable revisions; the accepted agreement is a snapshot; every review records which revisions it approved. A material edit therefore cannot silently keep an approval, and "what did we agree" has exactly one answer. Cost: more rows and a small diff view; benefit: the Lattice "weekly reports dropped at 23:40" problem becomes a visible proposed change rather than a memory.
 2. **One pure evaluator, read-time signals, write-time tasks.** `evaluateAccount` computes readiness and signals on every page load, so time-based alerts are never stale and no "health score" is stored; the only writes automation performs are deduplicated tasks keyed by (account, rule, subject). Cost: every list page evaluates every account (fine at this scale); benefit: rules are testable in one file and explainable on one page.
 3. **Rules compute, people decide, and the decision surface is small.** Six human acts carry weight: confirm agreement, decide review, accept handoff, assess health, record measurement, end engagement. Everything else is derived. Deliberately not built: charts, integrations, transcripts, AI health, drag-and-drop, uploads, workflow configuration, multiple deals per account, notifications, real auth.
+
+## 10. Continual grading (added after launch review of Trajectory's Continual Grading, Nov 2)
+
+What it is: a customer's expert grades a few dozen outputs; a grader is fitted to that judgment and writes its own rubric for every new output; it keeps improving as the expert corrects it. For this business it is the instrument that turns "better agent" into a number.
+
+Where it sits in the funnel, and why:
+
+| Stage | What happens | Why here |
+|---|---|---|
+| Top of funnel, self-serve (`/grade`, public) | Prospect pastes 5-20 outputs (no customer data), grades each good/bad with a reason, gets a draft rubric and the share rated unacceptable. Creates a Discovery account with the problem, the contact, a calibration row marked "pasted samples", and a follow-up task for sales | Qualifies by effort, costs no engineer time, and never touches production data before restrictions are recorded |
+| Discovery (Grading calibration block on Scope) | Two-hour session with the customer's expert on a redacted or production sample under recorded restrictions. Record: source, examples graded, held-out agreement %, grader version, baseline, failure categories, who graded, what was contested | The grading session is the discovery call: it surfaces the real problem, the real expert, and whether the baseline is contested |
+| Proposal / agreement | The applied calibration's baseline and basis ("metagrader v1 on production sample (n=120)") become the success criterion's starting point | One instrument from baseline to renewal |
+| Post-sale | The same grader measures production; a grader version change is a basis change, so the result is "not comparable" until re-baselined | Changing the ruler is not improvement |
+
+Automation vs judgment: the grader produces scores, rubrics and an agreement rate. A person decides the target, applies a calibration as the baseline (explicit checkbox), and decides whether a grader revision resets the numbers.
+
+Rules added: **Grader uncalibrated** (baseline in use has held-out agreement under 80%, or hand grading with no grader fitted) → warning; **Baseline not production** (baseline in use came from pasted samples) → warning. Self-serve results are never applied automatically.
+
+Not built: calling a grading API from the app, storing outputs or traces (the self-serve page keeps only counts and reasons), spam protection on the public page.
