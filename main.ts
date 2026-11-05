@@ -7,6 +7,7 @@ import { seed } from "./seed.ts";
 import { activity, loadAccount, loadAccounts, loadRelated, todayISO, users as loadUsers } from "./data.ts";
 import { ACTIVITIES, CALIBRATION_SOURCE, conflicts, parseJSON, evaluateAccount, handlingOf, isOpenAccount, isPresales, latest, readinessFor, REVIEW_KINDS, s, STAGE_LABEL, type Related } from "./rules.ts";
 import * as V from "./views.ts";
+import * as VA from "./views_account.ts";
 
 const d = await getDB();
 await seed(d);
@@ -183,7 +184,7 @@ app.post("/accounts", async (c) => {
 app.get("/accounts/:id", async (c) => {
   const x = await ctx(c), id = c.req.param("id");
   const r = await loadEval(id, x.users); if (!r) return page(c, x, "Not found", V.notFound(), 404);
-  return page(c, x, s(r.a.name), V.accountDetail(r.a, r.rel, r.ev, x, q(c, "tab") || "overview", await activity(d, id), q(c, "panel")));
+  return page(c, x, s(r.a.name), VA.accountDetail(r.a, r.rel, r.ev, x, q(c, "tab") || "overview", await activity(d, id), q(c, "panel")));
 });
 
 // Small explicit edits with optimistic versioning.
@@ -374,7 +375,7 @@ app.get("/reviews/:id", async (c) => {
   const x = await ctx(c), id = c.req.param("id");
   const rv = await d.get("SELECT r.*, u.name AS reviewer_name FROM cc2_reviews r LEFT JOIN cc2_users u ON u.id=r.reviewer_id WHERE r.id=?", [id]); if (!rv) return page(c, x, "Not found", V.notFound(), 404);
   const r = await loadEval(s(rv.account_id), x.users); if (!r) return c.notFound();
-  return page(c, x, "Review", V.reviewPanel(rv, r.a, r.rel, r.ev, x));
+  return page(c, x, "Review", VA.reviewPanel(rv, r.a, r.rel, r.ev, x));
 });
 app.post("/reviews/:id/decide", async (c) => {
   const x = await ctx(c), id = c.req.param("id"), f = await c.req.parseBody() as Body;
@@ -482,7 +483,7 @@ app.post("/accounts/:id/agreements", async (c) => {
 app.get("/accounts/:id/handoff", async (c) => {
   const x = await ctx(c), id = c.req.param("id");
   const r = await loadEval(id, x.users); if (!r) return page(c, x, "Not found", V.notFound(), 404);
-  return page(c, x, "Handoff", V.handoffPage(r.a, r.rel, r.ev, x));
+  return page(c, x, "Handoff", VA.handoffPage(r.a, r.rel, r.ev, x));
 });
 app.post("/handoffs/:id/accept", async (c) => {
   const x = await ctx(c), id = c.req.param("id"), f = await c.req.parseBody() as Body;

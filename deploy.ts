@@ -18,7 +18,7 @@ if (!id) {
   id = v.id; await Deno.writeTextFile(".valtown-id", id);
   console.log("created val", id);
 }
-const files = ["main.ts", "views.ts", "views_public.ts", "rules.ts", "data.ts", "db.ts", "schema.ts", "seed.ts", "README.md"];
+const files = ["main.ts", "views.ts", "views_account.ts", "views_public.ts", "rules.ts", "data.ts", "db.ts", "schema.ts", "seed.ts", "README.md"];
 const existing = new Set(((await api("GET", `/v2/vals/${id}/files?path=&recursive=true&limit=100`)).data as { path: string }[]).map((f) => f.path));
 for (const f of files) {
   let content: string;
