@@ -6,7 +6,7 @@ import { addDays } from "./rules.ts";
 export async function seed(d: DB, opts: { force?: boolean; today?: string } = {}) {
   await ensureSchema(d);
   if (Number((await d.get("SELECT COUNT(*) c FROM cc2_accounts"))?.c) > 0 && !opts.force) return false;
-  for (const t of ["activity", "measurements", "outcomes", "blockers", "meetings", "tasks", "handoffs", "reviews"]) await d.run(`DELETE FROM cc2_${t}`);
+  for (const t of ["activity", "calibrations", "measurements", "outcomes", "blockers", "meetings", "tasks", "handoffs", "reviews"]) await d.run(`DELETE FROM cc2_${t}`);
   await d.run("UPDATE cc2_accounts SET current_agreement_id=NULL");
   for (const t of ["agreements", "requirements", "proposals", "accounts", "users"]) await d.run(`DELETE FROM cc2_${t}`);
   const today = opts.today ?? new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });

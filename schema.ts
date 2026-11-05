@@ -63,6 +63,15 @@ CREATE TABLE IF NOT EXISTS cc2_agreements (                -- immutable acceptan
   supersedes_id TEXT REFERENCES cc2_agreements(id), created_at TEXT NOT NULL,
   UNIQUE(account_id, proposal_id)
 );
+CREATE TABLE IF NOT EXISTS cc2_calibrations (             -- expert grading sessions: how "good" was defined and measured
+  id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES cc2_accounts(id),
+  source TEXT NOT NULL,                                  -- self_serve_samples | redacted_sample | production_sample
+  n_examples INTEGER NOT NULL, agreement REAL,           -- % held-out agreement between the fitted grader and the expert; NULL = no grader fitted
+  grader_version TEXT, metric TEXT, baseline REAL, unit TEXT, direction TEXT,
+  failure_categories TEXT NOT NULL DEFAULT '[]',         -- JSON [{label, count}]
+  expert TEXT, notes TEXT, applied INTEGER NOT NULL DEFAULT 0,
+  recorded_by TEXT REFERENCES cc2_users(id), created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS cc2_measurements (             -- append-only series behind the outcome's latest value
   id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES cc2_accounts(id),
   value REAL NOT NULL, basis TEXT, measured_at TEXT NOT NULL, recorded_by TEXT REFERENCES cc2_users(id), created_at TEXT NOT NULL

@@ -8,7 +8,7 @@ export interface Gap { label: string; ok: boolean; hint?: string; anchor?: strin
 export interface Readiness { from: string; to: string | null; toLabel: string | null; items: Gap[]; ready: boolean; via: "advance" | "confirm_agreement" | "end" | null }
 export interface Related {
   proposals: Row[]; requirements: Row[]; reviews: Row[]; agreements: Row[]; handoffs: Row[];
-  tasks: Row[]; meetings: Row[]; blockers: Row[]; outcome: Row | null; users: Row[]; measurements?: Row[];
+  tasks: Row[]; meetings: Row[]; blockers: Row[]; outcome: Row | null; users: Row[]; measurements?: Row[]; calibrations?: Row[];
 }
 export interface Evaluation { signals: Signal[]; readiness: Readiness; nextStep: string; conflicts: string[]; agreementConflicts: string[] }
 
@@ -25,6 +25,8 @@ export const REVIEW_KINDS: Record<string, string> = {
 export const ACTIVITIES = ["inference", "routing", "grading", "training", "logging"] as const;
 export const STALLED_DAYS = 14;
 export const CHECKIN_DAYS = 30;
+export const CALIBRATION_MIN_AGREEMENT = 80;
+export const CALIBRATION_SOURCE: Record<string, string> = { self_serve_samples: "pasted samples (self-serve)", redacted_sample: "redacted sample", production_sample: "production sample" };
 export const RENEWAL_WINDOW_DAYS = 30;
 export const LOST_REASONS = ["no budget", "built in-house", "competitor", "no decision", "timing", "data restrictions", "other"];
 
@@ -171,6 +173,13 @@ export function evaluateAccount(a: Row, rel: Related, today: string): Evaluation
       const since = daysBetween(s(a.last_customer_contact_at || a.created_at), today);
       if (since >= STALLED_DAYS && !waiting.some((t) => !overdue(t, today))) sig("stalled_prospect", "warning", `No customer contact for ${since}d`, owner, "log_meeting");
       if (!a.budget && a.sales_stage !== "discovery") sig("budget_unknown", "warning", "Budget unknown", owner, "edit_account");
+    }
+    // grading calibration: the baseline is only as good as the grader behind it
+    const applied = (rel.calibrations ?? []).find((k) => k.applied) ?? null;
+    if (applied) {
+      if (applied.source === "self_serve_samples") sig("baseline_not_production", "warning", `Baseline comes from ${applied.n_examples} pasted samples, not production traces`, techOwner ?? owner, "record_calibration", s(applied.id));
+      if (applied.agreement == null) { if (applied.source !== "self_serve_samples") sig("grader_uncalibrated", "warning", "Baseline was graded by hand; no grader has been fitted, so it cannot be re-measured the same way", techOwner ?? owner, "record_calibration", s(applied.id)); }
+      else if (Number(applied.agreement) < CALIBRATION_MIN_AGREEMENT) sig("grader_uncalibrated", "warning", `Grader agrees with the expert on ${applied.agreement}% of held-out examples (need ${CALIBRATION_MIN_AGREEMENT}%); treat the baseline as provisional`, techOwner ?? owner, "record_calibration", s(applied.id));
     }
     for (const t of openTasks(rel).filter((t) => !t.owner_id && t.type !== "review")) sig("unowned_task", "warning", `Unowned ${t.type === "milestone" ? "milestone" : "action"}: ${t.title}`, owner, "open_account", s(t.id));
     if (!openTasks(rel).some((t) => t.due_date)) sig("missing_next_step", "warning", "No dated next step", owner, "add_action");

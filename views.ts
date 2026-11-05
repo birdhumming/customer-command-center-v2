@@ -2,7 +2,7 @@
 import { html, raw } from "npm:hono@4.6.14/html";
 import type { HtmlEscapedString } from "npm:hono@4.6.14/utils/html";
 import type { Row } from "./db.ts";
-import { ACTIVITIES, addDays, attention, daysBetween, type Evaluation, handlingOf, isPresales, latest, LOST_REASONS, n, outcomeStatus, parseJSON, type Related, REVIEW_KINDS, reviewStates, s, SEVERITY_LABEL, type Signal, STAGE_LABEL, STALLED_DAYS, RENEWAL_WINDOW_DAYS, CHECKIN_DAYS } from "./rules.ts";
+import { ACTIVITIES, addDays, attention, daysBetween, type Evaluation, handlingOf, isPresales, latest, LOST_REASONS, n, outcomeStatus, parseJSON, type Related, REVIEW_KINDS, reviewStates, s, SEVERITY_LABEL, type Signal, STAGE_LABEL, STALLED_DAYS, RENEWAL_WINDOW_DAYS, CHECKIN_DAYS, CALIBRATION_MIN_AGREEMENT, CALIBRATION_SOURCE } from "./rules.ts";
 
 export type H = HtmlEscapedString | Promise<HtmlEscapedString>;
 interface Ctx { me: Row | null; users: Row[]; today: string; path: string; msg: { err?: string; saved?: boolean } }
@@ -69,6 +69,7 @@ function actionFor(sg: Signal, a: Row): H {
     case "request_review": return html`<a href="/accounts/${id}?tab=scope#reviews">Request review</a>`;
     case "complete_task": return html`<a href="/accounts/${id}?tab=${sg.reason.includes("milestone") ? "delivery" : "overview"}#actions">Open commitment</a>`;
     case "open_account": return html`<a href="/accounts/${id}">Open account</a>`;
+    case "record_calibration": return html`<a href="/accounts/${id}?tab=scope#calibration">Review calibration</a>`;
     case "accept_handoff": return html`<a href="/accounts/${id}/handoff">Accept handoff</a>`;
     case "log_meeting": return html`<a href="/accounts/${id}?tab=overview#log">Log meeting</a>`;
     case "add_action": return html`<a href="/accounts/${id}?tab=overview#add-action">Add action</a>`;
@@ -251,6 +252,7 @@ function scopeTab(a: Row, rel: Related, ev: Evaluation, x: Ctx): H {
     <form method="post" action="/accounts/${id}/agreements"><input type="hidden" name="version" value="${v}"><div class="row"><label class="field" style="flex:3"><span>Acceptance evidence — note or document link *</span><input name="evidence" required style="width:100%" placeholder="e.g. order form link, signed PDF name, email subject"></label><label class="field"><span>Accepted on</span><input type="date" name="accepted_at" value="${t}"></label></div>
     <button class="primary">${agreement ? "Accept amendment" : "Confirm agreement"}</button> <span class="small muted">Snapshots rev ${p?.revision}${agreement ? ", keeps the earlier agreement, reopens handoff acceptance" : ", marks Won, creates the handoff and its acceptance task"}. A typed note is recorded as a claim.</span></form></details>` : ""}
   </div><div>
+  ${calibrationBlock(a, rel, x)}
   <h2 id="requirements">Customer data restrictions ${req ? html`<span class="small muted">rev ${req.revision}</span>` : ""}</h2>
   ${req ? html`<p><b>${{ unknown: "Unknown", none_stated: "None stated", specified: "Specified" }[s(req.restriction_status)]}</b>${req.restriction_status === "unknown" ? html` <span class="amber small">— unknown is not permission</span>` : ""}</p>
     ${req.restriction_status === "specified" ? html`<blockquote class="small">${req.wording}</blockquote><dl class="kv small"><dt>Covered activities</dt><dd>${parseJSON<string[]>(req.activities, []).join(", ") || "—"}</dd><dt>External processing allowed</dt><dd>${req.external_processing}</dd><dt>Retention</dt><dd>${req.retention}${req.retention_note ? ` — ${req.retention_note}` : ""}</dd><dt>Training use allowed</dt><dd>${req.training_use}</dd><dt>Evidence</dt><dd>${req.evidence_note ?? "—"}</dd></dl>` : req.evidence_note ? html`<p class="small muted">${req.evidence_note}</p>` : ""}` : html`<p class="amber small">Not recorded. Unknown is not permission.</p>`}
@@ -387,6 +389,54 @@ function changedBeforeAcceptance(p: Row, rel: Related): H {
   ${diffs.length ? html`<dl class="kv small">${diffs.map(([k, label]) => html`<dt>${label}</dt><dd><span class="muted">was:</span> <pre class="wrap" style="display:inline">${s(first[k]) || "—"}</pre><br><span class="muted">now:</span> <pre class="wrap" style="display:inline">${s(p[k]) || "—"}</pre></dd>`)}</dl>` : html`<p class="small muted">No field differs from rev 1.</p>`}`;
 }
 
+// Calibration: the expert grading session that defines "good" and produces the baseline. Shown pre- and post-sale.
+function calibrationBlock(a: Row, rel: Related, x: Ctx): H {
+  const id = s(a.id), ks = rel.calibrations ?? [];
+  const o = rel.outcome;
+  return html`<h2 id="calibration">Grading calibration</h2>
+  <p class="small muted">An expert grades a sample of the agent's outputs; a grader is fitted to their judgment and checked on held-out examples. The agreement rate says how far the grader can be trusted; the baseline becomes the success measurement only when someone applies it.</p>
+  ${ks.length ? html`<table><tr><th>When</th><th>Source</th><th>n</th><th>Agreement</th><th>Baseline</th><th>Failure categories</th><th></th></tr>${ks.map((k) => { const cats = parseJSON<{ label: string; count: number | null }[]>(k.failure_categories, []); const agr = k.agreement == null ? html`<span class="muted">no grader fitted</span>` : html`<span class="${Number(k.agreement) < CALIBRATION_MIN_AGREEMENT ? "amber" : "green"}">${k.agreement}%</span>`; return html`<tr><td class="nowrap">${fmt(k.created_at)}</td><td>${CALIBRATION_SOURCE[s(k.source)] ?? k.source}${k.source === "self_serve_samples" ? html` <span class="amber">(not production)</span>` : ""}<div class="small muted">${k.grader_version ?? ""}${k.expert ? html` · graded by ${k.expert}` : ""}</div></td><td>${k.n_examples}</td><td>${agr}</td><td>${k.baseline != null ? html`${k.baseline}${k.unit ?? ""} <span class="small muted">${k.metric ?? ""}</span>` : "—"}</td><td class="small">${cats.length ? cats.map((c) => `${c.label}${c.count != null ? ` ×${c.count}` : ""}`).join("; ") : "—"}${k.notes ? html`<div class="muted">${k.notes}</div>` : ""}</td><td class="small nowrap">${k.applied ? html`<span class="lbl">baseline in use</span>` : ""}</td></tr>`; })}</table>` : html`<p class="muted small">No grading session recorded. Prospects who used the self-serve page appear here with "pasted samples".</p>`}
+  <details class="drawer"><summary>Record a grading session</summary><form method="post" action="/accounts/${id}/calibrations">
+    <div class="row small"><label class="field"><span>Examples came from</span><select name="source"><option value="production_sample">production sample (under recorded restrictions)</option><option value="redacted_sample">redacted sample</option><option value="self_serve_samples">pasted samples (self-serve)</option></select></label><label class="field"><span>Examples graded</span><input name="n_examples" size="5"></label><label class="field"><span>Held-out agreement % (blank = no grader fitted)</span><input name="agreement" size="5"></label><label class="field" style="flex:2"><span>Grader version</span><input name="grader_version" placeholder="e.g. metagrader v1 (Trajectory)"></label></div>
+    <div class="row small"><label class="field" style="flex:2"><span>Metric</span><input name="metric" value="${o?.metric ?? ""}" placeholder="e.g. Outputs rated unacceptable"></label><label class="field"><span>Baseline</span><input name="baseline" size="6"></label><label class="field"><span>Unit</span><input name="unit" value="${o?.unit ?? "%"}" size="4"></label><label class="field"><span>Direction</span><select name="direction"><option value="lower" ${o?.direction !== "higher" ? "selected" : ""}>lower is better</option><option value="higher" ${o?.direction === "higher" ? "selected" : ""}>higher is better</option></select></label><label class="field" style="flex:2"><span>Expert who graded</span><input name="expert"></label></div>
+    <label class="field small"><span>Failure categories, one per line (optionally "label ×count")</span><textarea name="failure_categories" rows="3"></textarea></label>
+    <label class="field small"><span>Notes (what was contested, what the sample excluded)</span><input name="notes" style="width:100%"></label>
+    <label class="small"><input type="checkbox" name="apply" value="1"> Use this baseline as the success measurement for this account (replaces the current baseline; the basis records grader and sample)</label>
+    <p><button class="primary">Save</button></p></form></details>`;
+}
+
+// ---- public self-serve grading pages (no nav, no passcode) ----
+function publicLayout(title: string, body: H): H {
+  return html`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${title}</title><meta name="viewport" content="width=device-width,initial-scale=1"><style>${raw(CSS)}</style></head><body style="max-width:760px"><p class="small muted" style="margin-top:18px">Evalhouse · self-serve grading</p>${body}</body></html>`;
+}
+export function gradeStart(d: Record<string, string>, errs: Record<string, string> = {}): H {
+  const e = (k: string) => errs[k] ? html`<div class="ferr">${errs[k]}</div>` : "";
+  return publicLayout("Grade your agent", html`<h1>Grade 20 of your agent's outputs</h1>
+  <p>Paste outputs your AI agent produced, mark each one good or bad and say why. You get back a draft rubric of what you seem to care about and the share you rated unacceptable. Takes about 20 minutes.</p>
+  <p class="small"><b>Do not paste customer data or production logs.</b> Use synthetic, redacted or your own test examples. Real traces are graded later, in a session under your data restrictions.</p>
+  <form method="post" action="/grade/examples">
+  <div class="row"><label class="field"><span>Company *</span><input name="company" value="${d.company ?? ""}">${e("company")}</label><label class="field"><span>Your name and email *</span><input name="contact" value="${d.contact ?? ""}">${e("contact")}</label></div>
+  <label class="field"><span>What does the agent do? (one sentence) *</span><input name="agent" value="${d.agent ?? ""}" style="width:100%">${e("agent")}</label>
+  <label class="field"><span>Outputs, separated by a blank line (5-20) *</span><textarea name="examples" rows="14">${d.examples ?? ""}</textarea>${e("examples")}</label>
+  <p><button class="primary">Next: grade them</button></p></form>`);
+}
+export function gradeExamples(d: Record<string, string>, ex: string[], prev: { grade: string; why: string }[] = [], err?: string): H {
+  return publicLayout("Grade your agent", html`<h1>Grade each output</h1>${err ? html`<div class="flash err">${err}</div>` : ""}
+  <p class="small muted">${d.company} · ${ex.length} outputs. For every bad one, say in a few words what is wrong; the same words for the same problem.</p>
+  <form method="post" action="/grade/submit"><input type="hidden" name="company" value="${d.company}"><input type="hidden" name="contact" value="${d.contact}"><input type="hidden" name="agent" value="${d.agent}"><input type="hidden" name="n" value="${ex.length}">
+  ${ex.map((t, i) => html`<div style="border-top:1px solid #ddd;padding:10px 0"><input type="hidden" name="e${i}" value="${t}"><pre class="wrap small">${t}</pre>
+  <div class="row small"><label><input type="radio" name="g${i}" value="good" ${prev[i]?.grade === "good" ? "checked" : ""}> good</label><label><input type="radio" name="g${i}" value="bad" ${prev[i]?.grade === "bad" ? "checked" : ""}> bad</label><label class="field" style="flex:1"><span>why (if bad)</span><input name="w${i}" value="${prev[i]?.why ?? ""}" style="width:100%"></label></div></div>`)}
+  <p><button class="primary">Get my draft rubric</button></p></form>`);
+}
+export function gradeResult(d: Record<string, string>, n: number, bad: number, cats: { label: string; count: number }[]): H {
+  const rate = Math.round((bad / n) * 1000) / 10;
+  return publicLayout("Your draft rubric", html`<h1>${d.company}: draft rubric</h1>
+  <p><b>${bad} of ${n}</b> outputs rated unacceptable (${rate}%) on the examples you pasted. This is a starting point, not a measurement: it was graded on samples you chose, not on production traffic.</p>
+  <h2>What you seem to care about</h2>${cats.length ? html`<ol>${cats.map((c) => html`<li>${c.label} <span class="muted small">(${c.count} of ${bad})</span></li>`)}</ol>` : html`<p class="muted">Nothing was marked bad, so there is no rubric yet. Try harder examples.</p>`}
+  <h2>What we'd need to measure it for real</h2><ol class="small"><li>Which outputs we may look at: a redacted sample, or production traces under your data restrictions (retention, external processing, training use).</li><li>Two hours of the person who graded these, on a real sample, so a grader can be fitted to their judgment and checked on held-out examples.</li><li>The number you would call success, and by when.</li></ol>
+  <p class="small muted">We saved this as a discovery lead for ${d.company}; someone will follow up with ${d.contact}. Nothing you pasted is used for anything else.</p>`);
+}
+
 export function howAlertsWork(): H {
   return html`<h1>How alerts work</h1>
   <p>Alerts are computed from records every time a page loads; nothing is stored as a "health score". Each alert names its rule, the person responsible, and one action. Thresholds are demo assumptions.</p>
@@ -402,6 +452,8 @@ export function howAlertsWork(): H {
   <tr><td>Waiting on customer</td><td>An action marked "waiting on customer" is pending</td><td>Warning · shown instead of "stalled" while the date has not passed</td></tr>
   <tr><td>Below target</td><td>Active account whose latest comparable result misses the target, regardless of renewal date</td><td>Warning · record outcome / plan remediation</td></tr>
   <tr><td>Check-in overdue</td><td>Post-sale account with no customer meeting for ${CHECKIN_DAYS} days (or none ever)</td><td>Warning · log meeting</td></tr>
+  <tr><td>Grader uncalibrated</td><td>The baseline in use comes from a grading session with held-out agreement under ${CALIBRATION_MIN_AGREEMENT}%, or hand grading with no grader fitted</td><td>Warning · review calibration. The grader produces numbers; a person applies them as the baseline.</td></tr>
+  <tr><td>Baseline not production</td><td>The baseline in use came from pasted self-serve samples</td><td>Warning · re-grade on a real sample in discovery</td></tr>
   <tr><td>Unowned action</td><td>Open action or milestone with no owner (blank owner is recorded, not reassigned)</td><td>Warning · assign</td></tr>
   <tr><td>Expansion unowned</td><td>Expansion noted but no open action mentioning it</td><td>Warning · add action</td></tr>
   <tr><td>Stalled prospect</td><td>Open presales account with no customer contact for ${STALLED_DAYS} days (created date if never contacted)</td><td>Warning · log meeting</td></tr>

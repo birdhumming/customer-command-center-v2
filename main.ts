@@ -5,7 +5,7 @@ import { deleteCookie, getCookie, setCookie } from "npm:hono@4.6.14/cookie";
 import { type Arg, db as getDB, nowISO, type Row, type Stmt, uuid } from "./db.ts";
 import { seed } from "./seed.ts";
 import { activity, loadAccount, loadAccounts, loadRelated, todayISO, users as loadUsers } from "./data.ts";
-import { ACTIVITIES, conflicts, parseJSON, evaluateAccount, handlingOf, isOpenAccount, isPresales, latest, readinessFor, REVIEW_KINDS, s, STAGE_LABEL, type Related } from "./rules.ts";
+import { ACTIVITIES, CALIBRATION_SOURCE, conflicts, parseJSON, evaluateAccount, handlingOf, isOpenAccount, isPresales, latest, readinessFor, REVIEW_KINDS, s, STAGE_LABEL, type Related } from "./rules.ts";
 import * as V from "./views.ts";
 
 const d = await getDB();
@@ -39,7 +39,7 @@ app.post("/login", async (c) => {
   return c.redirect(next);
 });
 app.use("*", async (c, next) => {
-  if (["/login", "/healthz"].includes(c.req.path)) return next();
+  if (["/login", "/healthz"].includes(c.req.path) || c.req.path.startsWith("/grade")) return next();
   if (getCookie(c, "ccc2_auth") !== AUTH) {
     if (c.req.method !== "GET") return c.text("unauthorized", 401);
     return c.redirect("/login?next=" + encodeURIComponent(c.req.path + (new URL(c.req.url).search || "")));
@@ -48,7 +48,7 @@ app.use("*", async (c, next) => {
 });
 // Every change is attributed to a chosen teammate; no identity, no writes (and no silent fallback to the first user).
 app.use("*", async (c, next) => {
-  if (c.req.method === "POST" && !["/login", "/me", "/admin/reseed"].includes(c.req.path)) {
+  if (c.req.method === "POST" && !["/login", "/me", "/admin/reseed"].includes(c.req.path) && !c.req.path.startsWith("/grade")) {
     const me = getCookie(c, "ccc2_me");
     if (!me || !(await d.get("SELECT id FROM cc2_users WHERE id=?", [me]))) return c.text("Pick your name (top-right) before making changes.", 403);
   }
@@ -515,6 +515,75 @@ app.post("/accounts/:id/outcome", async (c) => {
 
 // Reset shared data to the seed; asks for the passcode again so it is not one click from wiping shared data.
 app.get("/admin", async (c) => page(c, await ctx(c), "Admin", V.adminPage()));
+
+// ---- Calibration: expert grading sessions. The grader produces numbers; people apply them as the baseline. ----
+app.post("/accounts/:id/calibrations", async (c) => {
+  const x = await ctx(c), id = c.req.param("id"), f = await c.req.parseBody() as Body;
+  const a = await loadAccount(d, id); if (!a) return c.notFound();
+  const ret = accPath(id, "scope", "calibration");
+  const source = Object.keys(CALIBRATION_SOURCE).includes(str(f, "source")) ? str(f, "source") : "";
+  if (!source) return back(c, ret, "Pick where the graded examples came from.");
+  const n = num(f, "n_examples"); if (n == null || !Number.isInteger(n) || n < 1 || n > 100000) return back(c, ret, "Number of graded examples must be a whole number.");
+  const agreement = str(f, "agreement") ? num(f, "agreement") : null; if (str(f, "agreement") && (agreement == null || agreement < 0 || agreement > 100)) return back(c, ret, "Agreement is a percentage 0-100, or blank if no grader was fitted.");
+  const baseline = str(f, "baseline") ? num(f, "baseline") : null; if (str(f, "baseline") && baseline == null) return back(c, ret, "Baseline must be a number, or blank.");
+  const apply = str(f, "apply") === "1";
+  const metric = str(f, "metric"); if (apply && (!metric || baseline == null)) return back(c, ret, "To use this as the success baseline, name the metric and give the baseline number.");
+  const cats = str(f, "failure_categories").split("\n").map((l) => l.trim()).filter(Boolean).map((l) => { const m = l.match(/^(.*?)(?:\s*[x×:]\s*(\d+))?$/); return { label: m?.[1]?.trim() || l, count: m?.[2] ? Number(m[2]) : null }; });
+  const direction = str(f, "direction") === "higher" ? "higher" : "lower";
+  const kid = uuid(), by = s(x.me?.id) || null;
+  const st: Stmt[] = [{ sql: "INSERT INTO cc2_calibrations(id,account_id,source,n_examples,agreement,grader_version,metric,baseline,unit,direction,failure_categories,expert,notes,applied,recorded_by,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", args: [kid, id, source, n, agreement, nul(f, "grader_version"), metric || null, baseline, nul(f, "unit"), direction, JSON.stringify(cats), nul(f, "expert"), nul(f, "notes"), apply ? 1 : 0, by, nowISO()] }];
+  if (apply) {
+    const basis = `${str(f, "grader_version") || "expert grading"} on ${CALIBRATION_SOURCE[source]} (n=${n})`;
+    const o = await d.get("SELECT * FROM cc2_outcomes WHERE account_id=?", [id]);
+    st.push({ sql: "UPDATE cc2_calibrations SET applied=0 WHERE account_id=? AND id<>?", args: [id, kid] });
+    st.push(o
+      ? { sql: "UPDATE cc2_outcomes SET metric=?, unit=COALESCE(?, unit), direction=?, baseline=?, baseline_basis=?, version=version+1, updated_at=? WHERE account_id=?", args: [metric, nul(f, "unit"), direction, baseline, basis, nowISO(), id] }
+      : { sql: "INSERT INTO cc2_outcomes(id,account_id,agreement_id,metric,unit,direction,baseline,baseline_basis,updated_at) VALUES (?,?,?,?,?,?,?,?,?)", args: [uuid(), id, s(a.current_agreement_id) || null, metric, nul(f, "unit"), direction, baseline, basis, nowISO()] });
+  }
+  st.push(act(id, by, "calibration_recorded", { source, n, agreement, baseline, applied: apply }));
+  await d.tx(st);
+  return back(c, accPath(id, "scope"), undefined, true);
+});
+
+// ---- Self-serve grading (public, no passcode): a prospect grades their own pasted examples. No production data. ----
+app.get("/grade", (c) => c.html(V.gradeStart({})));
+app.post("/grade/examples", async (c) => {
+  const f = await c.req.parseBody() as Body;
+  const draft = { company: str(f, "company"), contact: str(f, "contact"), agent: str(f, "agent"), examples: str(f, "examples") };
+  const errs: Record<string, string> = {};
+  if (!draft.company) errs.company = "Company name.";
+  if (!draft.contact) errs.contact = "Your name and email so we can send the write-up.";
+  if (draft.agent.length < 10) errs.agent = "One sentence on what the agent does.";
+  const ex = draft.examples.split(/\n\s*\n/).map((t) => t.trim()).filter(Boolean).slice(0, 20);
+  if (ex.length < 5) errs.examples = `Paste at least 5 outputs separated by blank lines (got ${ex.length}). No customer data, please.`;
+  if (Object.keys(errs).length) return c.html(V.gradeStart(draft, errs), 400);
+  return c.html(V.gradeExamples(draft, ex));
+});
+app.post("/grade/submit", async (c) => {
+  const f = await c.req.parseBody() as Body;
+  const draft = { company: str(f, "company"), contact: str(f, "contact"), agent: str(f, "agent") };
+  const n = Math.min(20, Math.max(0, Number(str(f, "n")) || 0));
+  const rows: { text: string; grade: string; why: string }[] = [];
+  for (let i = 0; i < n; i++) rows.push({ text: str(f, `e${i}`), grade: str(f, `g${i}`), why: str(f, `w${i}`) });
+  if (!draft.company || !draft.contact || rows.length < 5) return c.html(V.gradeStart(draft, { examples: "Session expired; paste the examples again." }), 400);
+  const ungraded = rows.filter((r) => !["good", "bad"].includes(r.grade)).length;
+  if (ungraded) return c.html(V.gradeExamples(draft, rows.map((r) => r.text), rows, `Grade every example (${ungraded} left).`), 400);
+  const bad = rows.filter((r) => r.grade === "bad");
+  const tally = new Map<string, number>();
+  for (const r of bad) { const k = r.why.trim().toLowerCase().replace(/[.\s]+$/, ""); if (k) tally.set(k, (tally.get(k) ?? 0) + 1); }
+  const cats = [...tally.entries()].sort((p, q) => q[1] - p[1]).map(([label, count]) => ({ label, count }));
+  const rate = Math.round((bad.length / rows.length) * 1000) / 10;
+  const us = await loadUsers(d);
+  const owner = us.find((u) => u.role === "sales") ?? us[0];
+  const id = uuid();
+  await d.tx([
+    { sql: "INSERT INTO cc2_accounts(id,name,owner_id,contact,problem,sales_stage,created_at,updated_at) VALUES (?,?,?,?,?,'discovery',?,?)", args: [id, draft.company, s(owner.id), draft.contact, `${draft.agent} (self-serve grading: ${bad.length}/${rows.length} outputs rated unacceptable by their expert)`, nowISO(), nowISO()] },
+    { sql: "INSERT INTO cc2_calibrations(id,account_id,source,n_examples,agreement,grader_version,metric,baseline,unit,direction,failure_categories,expert,notes,applied,recorded_by,created_at) VALUES (?,?,?,?,NULL,?,?,?,?,?,?,?,?,0,NULL,?)", args: [uuid(), id, "self_serve_samples", rows.length, "draft rubric v0 (self-serve)", "Outputs rated unacceptable by the customer's expert", rate, "%", "lower", JSON.stringify(cats), draft.contact, "Graded by the prospect on pasted examples; not production data. Re-grade on a real sample in discovery before using as a baseline.", nowISO()] },
+    { sql: "INSERT INTO cc2_tasks(id,account_id,title,type,owner_id,due_date,status,committed,customer_side,created_by,created_at,updated_at) VALUES (?,?,?,'action',?,?,'open',0,0,NULL,?,?)", args: [uuid(), id, `Follow up on self-serve grading: ${draft.company} (${rate}% unacceptable on ${rows.length} samples)`, s(owner.id), addDaysISO(todayISO(), 2), nowISO(), nowISO()] },
+    act(id, null, "self_serve_grading", { n: rows.length, bad: bad.length, contact: draft.contact }),
+  ]);
+  return c.html(V.gradeResult(draft, rows.length, bad.length, cats));
+});
 app.post("/admin/reseed", async (c) => {
   const f = await c.req.parseBody() as Body;
   if (str(f, "passcode") !== ADMIN_PASSCODE) return c.text("wrong admin passcode", 401);

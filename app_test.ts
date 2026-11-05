@@ -211,3 +211,38 @@ Deno.test("revops findings: existing-customer backfill, unowned action flagged, 
   // reseed needs the admin passcode, not the team passcode
   const rs = await fetchApp(new Request("http://x/admin/reseed", { method: "POST", headers: { cookie }, body: new URLSearchParams({ passcode: "evalhouse" }) })); assertEquals(rs.status, 401);
 });
+Deno.test("continual grading: calibration feeds the baseline; low agreement and pasted samples are flagged; self-serve /grade creates a Discovery lead", async () => {
+  const ns = await acc("Northstar Support");
+  let r = await post(`/accounts/${ns.id}/calibrations`, { source: "redacted_sample", n_examples: "40", agreement: "74", grader_version: "metagrader v1", metric: "Policy-incorrect answers", baseline: "23", unit: "%", direction: "lower", expert: "Dana (support lead)", failure_categories: "cites retired policy ×6\nwrong refund window ×3", apply: "1" }, U.Leo);
+  assertEquals(r.status, 302, r.err);
+  const o = (await d.get("SELECT * FROM cc2_outcomes WHERE account_id=?", [ns.id]))!;
+  assertEquals(Number(o.baseline), 23); assertMatch(String(o.baseline_basis), /metagrader v1 on redacted sample \(n=40\)/);
+  let page = await get(`/accounts/${ns.id}`); assertMatch(page.text, /Grader agrees with the expert on 74%/);
+  // a better session replaces it; the old one is kept but no longer "in use"
+  r = await post(`/accounts/${ns.id}/calibrations`, { source: "production_sample", n_examples: "120", agreement: "88", grader_version: "metagrader v2", metric: "Policy-incorrect answers", baseline: "19", unit: "%", direction: "lower", apply: "1" }, U.Leo);
+  assertEquals(r.status, 302, r.err);
+  assertEquals(Number((await d.get("SELECT COUNT(*) c FROM cc2_calibrations WHERE account_id=?", [ns.id]))!.c), 2);
+  assertEquals(Number((await d.get("SELECT COUNT(*) c FROM cc2_calibrations WHERE account_id=? AND applied=1", [ns.id]))!.c), 1);
+  page = await get(`/accounts/${ns.id}`); assert(!/Grader agrees with the expert on 74%/.test(page.text));
+  assertMatch((await post(`/accounts/${ns.id}/calibrations`, { source: "production_sample", n_examples: "x" }, U.Leo)).err, /whole number/);
+  assertMatch((await post(`/accounts/${ns.id}/calibrations`, { source: "production_sample", n_examples: "10", apply: "1" }, U.Leo)).err, /name the metric/);
+  // self-serve: public, no passcode, no identity
+  const pub = async (path: string, body?: Record<string, string>) => { const res = await fetchApp(new Request("http://x" + path, body ? { method: "POST", body: new URLSearchParams(body) } : {})); return { status: res.status, text: await res.text() }; };
+  assertEquals((await pub("/grade")).status, 200);
+  const ex = Array.from({ length: 6 }, (_, i) => `Agent reply ${i}: your refund will arrive in ${i} days.`).join("\n\n");
+  let s2 = await pub("/grade/examples", { company: "Orbit Dental", contact: "Sam Reyes sam@orbit.example", agent: "Answers patient billing questions in chat", examples: ex });
+  assertEquals(s2.status, 200); assertMatch(s2.text, /name="e5"/);
+  s2 = await pub("/grade/examples", { company: "Orbit Dental", contact: "Sam", agent: "Answers billing questions", examples: "only one" }); assertEquals(s2.status, 400); assertMatch(s2.text, /at least 5/);
+  const body: Record<string, string> = { company: "Orbit Dental", contact: "Sam Reyes sam@orbit.example", agent: "Answers patient billing questions in chat", n: "6" };
+  for (let i = 0; i < 6; i++) { body[`e${i}`] = `Agent reply ${i}`; body[`g${i}`] = i < 2 ? "bad" : "good"; body[`w${i}`] = i < 2 ? "Wrong refund window." : ""; }
+  const incomplete = { ...body }; delete incomplete.g3;
+  assertMatch((await pub("/grade/submit", incomplete)).text, /Grade every example \(1 left\)/);
+  const done = await pub("/grade/submit", body); assertEquals(done.status, 200); assertMatch(done.text, /2 of 6/); assertMatch(done.text, /wrong refund window/);
+  const od = await acc("Orbit Dental"); assertEquals(od.sales_stage, "discovery"); assertEquals(od.owner_id, U.Maya);
+  const k = (await d.get("SELECT * FROM cc2_calibrations WHERE account_id=?", [od.id]))!; assertEquals(k.source, "self_serve_samples"); assertEquals(Number(k.applied), 0); assertEquals(Number(k.baseline), 33.3);
+  assertEquals(Number((await d.get("SELECT COUNT(*) c FROM cc2_tasks WHERE account_id=? AND title LIKE 'Follow up on self-serve grading%'", [od.id]))!.c), 1);
+  page = await get(`/accounts/${od.id}?tab=scope`); assertMatch(page.text, /pasted samples \(self-serve\)/); assertMatch(page.text, /not production/);
+  // applying the self-serve numbers as the baseline is allowed but flagged
+  await post(`/accounts/${od.id}/calibrations`, { source: "self_serve_samples", n_examples: "6", metric: "Unacceptable outputs", baseline: "33.3", unit: "%", apply: "1" }, U.Leo);
+  page = await get(`/accounts/${od.id}`); assertMatch(page.text, /Baseline comes from 6 pasted samples, not production traces/);
+});
